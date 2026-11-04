@@ -70,6 +70,10 @@ class PostgresTests(unittest.TestCase):
         result = analyze(self.store.history("Lotto", "ordinario", "Roma", True), self.rules)
         self.assertEqual(result["draws"], 1000)
         self.assertEqual(self.store.count(), 0)
+        from data_sources.preview import preview_content
+        preview = preview_content(self.store, (root / "examples/synthetic_lotto_roma.json").read_bytes(), "json", True)
+        self.assertEqual(preview["duplicates"], 1000)
+        self.assertEqual(preview["new"], 0)
 
     def test_immutable_forecast_and_result_arrival(self):
         import psycopg

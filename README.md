@@ -142,6 +142,22 @@ Le CLI scientifiche utilizzano attualmente la configurazione predefinita.
 ## Importazioni e aggiornamento
 
 Nell'Archivio scegliere **Importa file / aggiorna da fonte configurabile**.
+Nella versione web **Importa archivio → Controlla file** esegue prima
+un'anteprima senza salvare estrazioni o log. Sono contate nuove righe,
+duplicati identici, conflitti e righe non valide, anche all'interno dello
+stesso file. Si vedono le prime 20 righe e fino a 100 errori. Solo
+**Conferma importazione** salva le righe valide; l'archivio viene ricontrollato
+per gestire eventuali modifiche nel frattempo. Un checksum impedisce di
+confermare per errore un file diverso da quello esaminato.
+
+Il dialogo offre un modello CSV vuoto: non contiene estrazioni dimostrative
+che possano essere scambiate per dati reali. In **Archivio estrazioni** sono
+disponibili anche **Inserisci estrazione** (con fonte, data e ora ISO con fuso,
+eventuali extra) ed **Esporta selezione JSON** (fino a 10.000 righe della
+serie filtrata). L'export contiene il flag sintetico, così una successiva
+importazione non può scambiare il demo per dati reali. Non è un backup
+completo del database: non comprende previsioni e log.
+
 Formati: CSV UTF-8 con virgola, punto e virgola o tab; XLSX (primo foglio);
 JSON (lista di oggetti). Intestazioni:
 
@@ -158,7 +174,9 @@ JSON (lista di oggetti). Intestazioni:
 
 I primi cinque campi sono obbligatori; ruota ed extra quando richiesti dalla
 variante. Le date Excel devono essere testo ISO con fuso: non si inventa un
-fuso per celle data native. I campi in eccesso vengono ignorati.
+fuso per celle data native. Campi opzionali sconosciuti vengono ignorati;
+intestazioni duplicate, chiavi JSON duplicate e celle CSV oltre le
+intestazioni vengono rifiutate per evitare interpretazioni ambigue.
 
 L'importazione è **parziale**: salva le righe valide e registra gli errori per
 riga. Il rapporto distingue aggiunte, duplicati e rifiuti. Limiti: 25 MiB,

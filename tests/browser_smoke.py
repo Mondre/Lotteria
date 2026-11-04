@@ -46,16 +46,32 @@ with sync_playwright() as p:
  payload=[{'game':'Lotto','variant':'ordinario','wheel':'Roma','draw_id':'WEB-SYNTHETIC-<img src=x onerror="window.__lottoXSS=1">','occurred_at':'2025-01-02T20:00:00+01:00','numbers':[1,2,3,4,5],'extras':{},'synthetic':True}]
  page.locator('#file').set_input_files({'name':'synthetic-browser.json','mimeType':'application/json','buffer':json.dumps(payload).encode()})
  page.locator('#import-synthetic').check()
- page.get_by_role('button',name='Avvia importazione').click()
+ page.get_by_role('button',name='Controlla file').click()
+ page.locator('#import-preview').wait_for(state='visible',timeout=30000)
+ assert 'Nessun dato salvato' in page.locator('#import-feedback').inner_text()
+ page.get_by_role('button',name='Conferma importazione').click()
  page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Importazione:')")
  assert '0 rifiutate' in page.locator('#status').inner_text()
  assert '<img src=x' in page.locator('#archive-table tbody').inner_text()
  assert page.locator('#archive-table img').count()==0
  assert page.evaluate('() => window.__lottoXSS') is None
+ page.locator('#open-manual').click()
+ page.locator('#manual-id').fill('WEB-SYNTHETIC-MANUAL')
+ page.locator('#manual-date').fill('2025-01-03T20:00:00+01:00')
+ page.locator('#manual-numbers').fill('6 7 8 9 10')
+ page.locator('#manual-source').fill('Documento sintetico di test browser')
+ page.get_by_role('button',name='Salva estrazione',exact=True).click()
+ page.locator('#manual-dialog').wait_for(state='hidden',timeout=10000)
+ page.locator('#archive-table tbody').get_by_text('WEB-SYNTHETIC-MANUAL',exact=True).wait_for(state='visible',timeout=10000)
+ with page.expect_download() as download_info:
+  page.locator('#export-archive').click()
+ downloaded=download_info.value
+ exported=json.loads(Path(downloaded.path()).read_text())
+ assert any(row['draw_id']=='WEB-SYNTHETIC-MANUAL' and row['synthetic'] for row in exported)
  page.set_viewport_size({'width':390,'height':844})
  page.locator('button.nav-item[data-view="dashboard"]').click()
  page.screenshot(path=str(folder/'mobile.png'),full_page=True)
  assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Overflow orizzontale mobile'
  assert not errors, errors
- print('Browser OK: dashboard vuota/demo, analisi 90 numeri, 5 combinazioni, backtest 300 target, registro, importazione e escaping HTML, layout mobile; nessun errore JS')
+ print('Browser OK: dashboard vuota/demo, analisi 90 numeri, 5 combinazioni, backtest 300 target, registro, anteprima/importazione, inserimento manuale, esportazione, escaping HTML, layout mobile; nessun errore JS')
  browser.close()

@@ -14,6 +14,15 @@ MAX_ROWS = 100000
 REQUIRED = {"game", "variant", "draw_id", "occurred_at", "numbers"}
 
 
+def unique_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON: campi duplicati non consentiti")
+        result[key] = value
+    return result
+
+
 @dataclass
 class ImportReport:
     inserted: int = 0
@@ -26,7 +35,7 @@ def read_records(content: bytes, format: str) -> list[dict[str, Any]]:
     if len(content) > MAX_BYTES:
         raise ValueError("Archivio oltre il limite di 25 MiB")
     if format == "json":
-        records = json.loads(content.decode("utf-8-sig"))
+        records = json.loads(content.decode("utf-8-sig"), object_pairs_hook=unique_fields)
         if not isinstance(records, list):
             raise ValueError("JSON: è richiesta una lista di oggetti")
     elif format == "csv":
@@ -36,6 +45,8 @@ def read_records(content: bytes, format: str) -> list[dict[str, Any]]:
         except csv.Error:
             dialect = csv.excel
         reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+        if len(reader.fieldnames or []) != len(set(reader.fieldnames or [])):
+            raise ValueError("CSV: intestazioni duplicate non consentite")
         if not REQUIRED.issubset(set(reader.fieldnames or [])):
             raise ValueError("CSV: intestazioni richieste mancanti")
         records = list(reader)
@@ -73,6 +84,8 @@ def read_records(content: bytes, format: str) -> list[dict[str, Any]]:
 def parse_record(record: dict[str, Any], source: str, synthetic: bool) -> Draw:
     if not isinstance(record, dict) or not REQUIRED.issubset(record):
         raise ValueError("Campi richiesti mancanti")
+    if None in record:
+        raise ValueError("La riga contiene più campi delle intestazioni")
     marker = record.get("synthetic", False)
     if isinstance(marker, str):
         if marker.strip().lower() not in ("true", "false", "1", "0", ""):
@@ -95,7 +108,7 @@ def parse_record(record: dict[str, Any], source: str, synthetic: bool) -> Draw:
     if extras is None or extras == "":
         extras = {}
     if isinstance(extras, str):
-        extras = json.loads(extras)
+        extras = json.loads(extras, object_pairs_hook=unique_fields)
     if not isinstance(extras, dict):
         raise ValueError("extras deve essere un oggetto JSON")
     for key in ("game", "variant", "draw_id", "occurred_at"):

@@ -86,9 +86,7 @@ class Store:
                 (draw.game, draw.variant, draw.wheel, draw.draw_id, draw.synthetic),
             ).fetchone()
             if existing:
-                same = (datetime.fromisoformat(existing["occurred_at"]) == draw.occurred_at
-                        and json.loads(existing["numbers"]) == list(draw.numbers)
-                        and json.loads(existing["extras"]) == draw.extras)
+                same = self.same_content(self.from_row(existing), draw)
                 if not same:
                     raise ValueError("Identificativo esistente con contenuto diverso: nessuna sovrascrittura")
                 return False
@@ -137,10 +135,36 @@ class Store:
                 "SELECT * FROM draws WHERE game=? AND variant=? AND wheel=? AND synthetic=? "
                 "ORDER BY occurred_at DESC,id DESC LIMIT ?", (game, variant, wheel, synthetic, limit),
             ).fetchall()
-        return [Draw(row["game"], row["variant"], row["draw_id"],
-                     datetime.fromisoformat(row["occurred_at"]), tuple(json.loads(row["numbers"])),
-                     row["wheel"], json.loads(row["extras"]), bool(row["synthetic"]), row["source"])
-                for row in reversed(rows)]
+        return [self.from_row(row) for row in reversed(rows)]
+
+    @staticmethod
+    def from_row(row) -> Draw:
+        return Draw(row["game"], row["variant"], row["draw_id"],
+                    datetime.fromisoformat(row["occurred_at"]), tuple(json.loads(row["numbers"])),
+                    row["wheel"], json.loads(row["extras"]), bool(row["synthetic"]), row["source"])
+
+    @staticmethod
+    def same_content(left: Draw, right: Draw) -> bool:
+        return left.occurred_at == right.occurred_at and left.numbers == right.numbers and left.extras == right.extras
+
+    def existing_draws(self, draws: list[Draw]) -> dict[tuple, Draw]:
+        """Lookup in blocchi compatibili con SQLite e PostgreSQL, senza scritture."""
+        grouped = {}
+        for draw in draws:
+            grouped.setdefault(draw.synthetic, set()).add((draw.game, draw.variant, draw.wheel, draw.draw_id))
+        found = {}
+        with self.connect() as connection:
+            for synthetic, keys in grouped.items():
+                keys = sorted(keys)
+                for offset in range(0, len(keys), 200):
+                    batch = keys[offset:offset + 200]
+                    placeholders = ",".join("(?,?,?,?)" for _ in batch)
+                    query = "SELECT * FROM draws WHERE synthetic=? AND (game,variant,wheel,draw_id) IN (" + placeholders + ")"
+                    parameters = [synthetic] + [value for key in batch for value in key]
+                    for row in connection.execute(query, parameters).fetchall():
+                        draw = self.from_row(row)
+                        found[(draw.game, draw.variant, draw.wheel, draw.draw_id, draw.synthetic)] = draw
+        return found
 
     def save_prediction(self, payload: dict, target_id: str, target_date: datetime) -> str:
         import uuid

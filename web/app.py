@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
 import json
+import hashlib
 import logging
 import os
 import secrets
@@ -14,10 +15,10 @@ from typing import Literal
 from urllib.parse import urlsplit
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, AwareDatetime, StrictInt
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from database.factory import create_store
@@ -51,6 +52,19 @@ class SavePrediction(BaseModel):
     job_id: str
     target_id: str = Field(min_length=1, max_length=200)
     target_date: datetime
+
+
+class ManualDraw(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    game: str
+    variant: str
+    wheel: str = ""
+    synthetic: bool = False
+    draw_id: str = Field(min_length=1, max_length=200)
+    occurred_at: AwareDatetime
+    numbers: list[StrictInt] = Field(min_length=1, max_length=90)
+    extras: dict[str, StrictInt] = Field(default_factory=dict)
+    source: str = Field(min_length=1, max_length=200)
 
 
 class Jobs:
@@ -203,9 +217,8 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
         path = Path(__file__).parent.parent / "examples" / "synthetic_lotto_roma.json"
         return jobs.submit("demo", lambda: asdict(import_file(store, path, synthetic=True)))
 
-    @app.post("/api/import", status_code=202)
-    async def import_archive(request: Request, format: Literal["csv", "xlsx", "json"], synthetic: bool = False):
-        from data_sources.importer import MAX_BYTES, import_content
+    async def upload_content(request: Request) -> bytes:
+        from data_sources.importer import MAX_BYTES
         content = bytearray()
         async for chunk in request.stream():
             content.extend(chunk)
@@ -213,7 +226,50 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
                 raise HTTPException(413, "Il file supera 25 MiB")
         if not content:
             raise HTTPException(422, "Selezionare un file non vuoto")
-        return jobs.submit("import", lambda: asdict(import_content(store, bytes(content), format, "importazione_web", synthetic)))
+        return bytes(content)
+
+    @app.post("/api/import/preview", status_code=202)
+    async def preview_archive(request: Request, format: Literal["csv", "xlsx", "json"], synthetic: bool = False):
+        from data_sources.preview import preview_content
+        content = await upload_content(request)
+        return jobs.submit("preview", lambda: preview_content(store, content, format, synthetic))
+
+    @app.post("/api/import", status_code=202)
+    async def import_archive(request: Request, format: Literal["csv", "xlsx", "json"], synthetic: bool = False,
+                             expected_sha256: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$")):
+        from data_sources.importer import import_content
+        content = await upload_content(request)
+        if expected_sha256 and not secrets.compare_digest(hashlib.sha256(content).hexdigest(), expected_sha256):
+            raise HTTPException(409, "Il file è cambiato dopo l'anteprima: eseguire nuovamente il controllo")
+        return jobs.submit("import", lambda: asdict(import_content(store, content, format, "importazione_web", synthetic)))
+
+    @app.get("/api/import/template")
+    def import_template():
+        return Response("game,variant,draw_id,occurred_at,numbers,wheel,extras,synthetic\r\n", media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="modello-estrazioni.csv"'})
+
+    @app.get("/api/archive/export")
+    def export_archive(game: str = "Lotto", variant: str = "ordinario", wheel: str = "Roma", synthetic: bool = False,
+                       limit: int = Query(default=1000, ge=1, le=10000)):
+        validate_selection(Selection(game=game, variant=variant, wheel=wheel, synthetic=synthetic, limit=limit))
+        rows = []
+        for draw in store.history(game, variant, wheel, synthetic, limit):
+            row = asdict(draw)
+            row["occurred_at"] = draw.occurred_at.isoformat()
+            rows.append(row)
+        return Response(json.dumps(rows, ensure_ascii=False, allow_nan=False), media_type="application/json",
+                        headers={"Content-Disposition": 'attachment; filename="archivio-estrazioni.json"'})
+
+    @app.post("/api/draws", status_code=201)
+    def manual_draw(body: ManualDraw):
+        from games.models import Draw
+        draw = Draw(body.game, body.variant, body.draw_id.strip(), body.occurred_at, tuple(body.numbers),
+                    body.wheel, body.extras, body.synthetic, body.source.strip())
+        try:
+            inserted = store.add_draw(draw)
+        except (ValueError, TypeError) as error:
+            raise HTTPException(422, str(error)) from error
+        return {"inserted": inserted, "duplicate": not inserted}
 
     @app.post("/api/jobs", status_code=202)
     def experiment(selection: Experiment):

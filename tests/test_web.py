@@ -111,6 +111,38 @@ class WebTests(unittest.TestCase):
         self.assertEqual(job["status"], "failed")
         self.assertIn("Nessuna estrazione", job["error"])
 
+    def test_preview_confirm_hash_and_archive_export_round_trip(self):
+        row = {"game": "Lotto", "variant": "ordinario", "wheel": "Roma", "draw_id": "preview",
+               "occurred_at": "2025-01-01T20:00:00+01:00", "numbers": [1, 2, 3, 4, 5], "extras": {}, "synthetic": True}
+        content = json.dumps([row]).encode()
+        preview = self.wait_job(self.post("/api/import/preview?format=json&synthetic=true", content=content))
+        self.assertEqual(preview["result"]["new"], 1)
+        self.assertEqual(self.store.count(True), 0)
+        sha = preview["result"]["sha256"]
+        mismatch = self.post("/api/import?format=json&synthetic=true&expected_sha256=" + sha, content=b"[]")
+        self.assertEqual(mismatch.status_code, 409)
+        imported = self.wait_job(self.post("/api/import?format=json&synthetic=true&expected_sha256=" + sha, content=content))
+        self.assertEqual(imported["result"]["inserted"], 1)
+        exported = self.client.get("/api/archive/export?synthetic=true")
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.json()[0]["draw_id"], "preview")
+        self.assertTrue(exported.json()[0]["synthetic"])
+        self.assertIn("attachment", exported.headers["content-disposition"])
+        self.assertEqual(self.client.get("/api/archive/export?synthetic=false").json(), [])
+
+    def test_manual_entry_valid_duplicate_conflict_and_date_validation(self):
+        row = {"game": "Lotto", "variant": "ordinario", "wheel": "Roma", "draw_id": "manual",
+               "occurred_at": "2025-01-01T20:00:00+01:00", "numbers": [1, 2, 3, 4, 5], "extras": {}, "synthetic": True,
+               "source": "Documento sintetico di test"}
+        self.assertTrue(self.post("/api/draws", json=row).json()["inserted"])
+        self.assertTrue(self.post("/api/draws", json=row).json()["duplicate"])
+        for changed in (dict(row, numbers=[2, 3, 4, 5, 6]), dict(row, numbers=[True, 2, 3, 4, 5]),
+                        dict(row, occurred_at="2025-01-01T20:00:00"), dict(row, source=" "),
+                        dict(row, occurred_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat())):
+            self.assertEqual(self.post("/api/draws", json=changed).status_code, 422)
+        self.assertEqual(self.store.count(True), 1)
+        self.assertEqual(self.client.get("/api/import/template").status_code, 200)
+
     def test_job_queue_is_bounded(self):
         from threading import Event
         from fastapi import HTTPException
