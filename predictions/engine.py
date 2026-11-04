@@ -42,7 +42,7 @@ def generate(draws: list[Draw], registry: RuleRegistry, model_name: str = "frequ
     if len(tickets) < combinations:
         raise ValueError("Non è stato possibile generare abbastanza combinazioni distinte")
     snapshot = json.dumps([{"id": draw.draw_id, "date": draw.occurred_at.isoformat(),
-                            "numbers": draw.numbers, "extras": draw.extras} for draw in draws], sort_keys=True)
+                            "numbers": draw.numbers, "extras": draw.extras, "date_precision": draw.date_precision} for draw in draws], sort_keys=True)
     training_hash = hashlib.sha256(snapshot.encode()).hexdigest()
     rules_hash = hashlib.sha256(json.dumps(rule, sort_keys=True).encode()).hexdigest()
     version = hashlib.sha256(f"v1:{model_name}:{seed}:{training_hash}:{rules_hash}".encode()).hexdigest()
@@ -50,13 +50,16 @@ def generate(draws: list[Draw], registry: RuleRegistry, model_name: str = "frequ
             "synthetic": draws[0].synthetic, "rules_verified": bool(rule["verified"]),
             "model": model_name, "seed": seed, "train_size": len(draws),
             "train_end": draws[-1].occurred_at.isoformat(), "train_last_id": draws[-1].draw_id,
+            "train_end_precision": draws[-1].date_precision,
             "training_sha256": training_hash, "rules_sha256": rules_hash,
             "model_version": version, "implementation_version": "1", "tickets": tickets,
             "ensemble_validation": getattr(model, "validation", None),
             "validation": "Nessuna validazione fuori campione associata a questa generazione: eseguire un backtest separato.",
             "random_theoretical_mean_matches": rule["count"] ** 2 / values.shape[1],
             "notes": "Punteggi relativi non calibrati: non sono probabilità di vincita. "
-                     "Solo numeri principali, senza extra o Numerone. Nessuna vincita garantita."}
+                     "Solo numeri principali, senza extra o Numerone. Nessuna vincita garantita. "
+                     + ("Le date dello storico non indicano un'ora osservata. Le previsioni emesse nel giorno del risultato "
+                        "possono non essere valutabili automaticamente." if any(draw.date_precision == "date" for draw in draws) else "")}
 
 
 def save_prediction(store: Store, result: dict, target_id: str, target_date: datetime) -> str:

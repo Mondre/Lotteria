@@ -4,7 +4,7 @@ from scipy.stats import hypergeom
 from games.models import Draw
 from games.rules import RuleRegistry
 from lotto_statistics.engine import holm, matrix
-from machine_learning.models import ExperimentalModel, top_ticket
+from machine_learning.models import MODELS, ExperimentalModel, top_ticket, minimum_history
 
 
 def null_tail(total_hits: int, steps: int, population: int, count: int) -> float:
@@ -32,6 +32,11 @@ def walk_forward(draws: list[Draw], registry: RuleRegistry, model_names: tuple[s
         raise ValueError("Backtest: le date devono essere strettamente crescenti; selezionare una singola serie")
     # Le baseline fanno sempre parte del confronto, senza duplicarle.
     names = list(dict.fromkeys(("uniform", "frequency") + tuple(model_names)))
+    if model_factory is ExperimentalModel and any(name not in MODELS for name in names):
+        raise ValueError("Modello di backtest non supportato")
+    required = minimum_history(names)
+    if min(initial, train_window or initial) < required:
+        raise ValueError(f"I modelli selezionati richiedono almeno {required} estrazioni in ogni finestra di training")
     models = {name: model_factory(name, count, seed) for name in names}
     # Stream RNG separati: aggiungere un modello non modifica le baseline.
     import hashlib
@@ -43,6 +48,7 @@ def walk_forward(draws: list[Draw], registry: RuleRegistry, model_names: tuple[s
         start = max(0, t - train_window) if train_window else 0
         history = values[start:t]
         row = {"target_id": draws[t].draw_id, "target_date": draws[t].occurred_at.isoformat(),
+               "target_date_precision": draws[t].date_precision,
                "train_last_id": draws[t - 1].draw_id, "train_size": len(history), "models": {}}
         for name, model in models.items():
             if (t - initial) % retrain_every == 0:
@@ -54,10 +60,11 @@ def walk_forward(draws: list[Draw], registry: RuleRegistry, model_names: tuple[s
             row["models"][name] = {"numbers": sorted((ticket + rule["minimum"]).tolist()), "matches": match}
         steps.append(row)
     expected = count * count / population
-    rng = np.random.default_rng(seed)
     summaries = []
     p_values = []
     for name in names:
+        # Anche gli IC rimangono invariati se si riordinano o aggiungono modelli.
+        rng = np.random.default_rng(np.random.SeedSequence([seed, int.from_bytes(hashlib.sha256(("ci:" + name).encode()).digest()[:4], "little")]))
         outcomes = np.asarray(hits[name])
         mean = float(outcomes.mean())
         # Bootstrap descrittivo iid; non giustifica causalità né significatività fuori dal modello nullo.
@@ -80,6 +87,8 @@ def walk_forward(draws: list[Draw], registry: RuleRegistry, model_names: tuple[s
             "synthetic": draws[0].synthetic, "rules_verified": bool(rule["verified"]),
             "initial": initial, "train_window": train_window, "retrain_every": retrain_every,
             "seed": seed, "test_steps": len(steps), "summary": summaries, "steps": steps,
+            "model_names": names,
+            "evaluation_version": "2",
             "conclusion": ("Nessun algoritmo supera il modello casuale nei test eseguiti." if not supported
                            else "Scostamento dal caso nel campione di test: " + ", ".join(supported) +
                            ". Richiede replica indipendente; non dimostra probabilità di vincita future."),

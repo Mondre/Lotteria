@@ -100,6 +100,49 @@ class PostgresTests(unittest.TestCase):
             raise RuntimeError("Interruzione di test")
         self.assertEqual(self.store.count(True), 0)
 
+    def test_v2_migration_and_persistent_source_cache(self):
+        from database.postgres import PostgresStore
+        self.store.add_draw(self.draw())
+        with self.store.connect() as connection:
+            connection.execute("ALTER TABLE draws DROP COLUMN date_precision")
+            connection.execute("DROP TABLE source_updates")
+            connection.execute("DROP TABLE experiments")
+            connection.execute("UPDATE schema_version SET version=2")
+        self.store.close()
+        self.store = PostgresStore(self.dsn, self.rules)
+        self.addCleanup(self.store.close)
+        self.assertEqual(self.store.count(True), 1)
+        self.assertEqual(self.store.history("Lotto", "ordinario", "Roma", True)[0].date_precision, "instant")
+        self.store.save_sync_info("test", {"covered_days": ["2025-01-01"], "requested": 1000})
+        self.store.close()
+        self.store = PostgresStore(self.dsn, self.rules)
+        self.addCleanup(self.store.close)
+        self.assertEqual(self.store.sync_info("test")["requested"], 1000)
+        self.assertEqual(self.store.list_experiments()["total"], 0)
+
+    def test_scientific_result_persistence_and_filter_on_postgres(self):
+        from database.postgres import PostgresStore
+        created = datetime.now(timezone.utc).isoformat()
+        self.store.save_experiment("pg-result", "backtest", "completed", {"seed": 42}, created,
+                                   result={"test_steps": 300, "summary": [{"mean_matches": .25}]})
+        self.store.close()
+        self.store = PostgresStore(self.dsn, self.rules)
+        self.addCleanup(self.store.close)
+        self.assertEqual(self.store.experiment("pg-result")["result"]["test_steps"], 300)
+        self.assertEqual(self.store.list_experiments(operation="backtest")["total"], 1)
+        self.assertEqual(self.store.list_experiments(operation="generate")["total"], 0)
+
+    def test_automatic_update_and_verified_history_on_postgres(self):
+        from tests.test_automatic_sources import fixture_archive
+        from data_sources.lotto_official import parse_archive
+        from data_sources.sync import Synchronizer
+        draws, metadata = parse_archive(fixture_archive(), self.rules)
+        synchronizer = Synchronizer(self.store, lambda *_: (draws, metadata))
+        result = synchronizer.ensure("Lotto", "ordinario", "Roma")
+        self.assertEqual(result["inserted"], 22)
+        self.assertEqual(len(synchronizer.history("Lotto", "ordinario", "Roma", 1000)), 2)
+        self.assertEqual(synchronizer.ensure("Lotto", "ordinario", "Roma")["state"], "cached")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -119,7 +119,7 @@ def parse_record(record: dict[str, Any], source: str, synthetic: bool) -> Draw:
         raise ValueError("wheel deve essere testo")
     return Draw(record["game"].strip(), record["variant"].strip(), record["draw_id"].strip(),
                 datetime.fromisoformat(record["occurred_at"].strip()), tuple(numbers),
-                wheel.strip(), extras, synthetic, source)
+                wheel.strip(), extras, synthetic, source, record.get("date_precision", "instant"))
 
 
 def import_content(store: Store, content: bytes, format: str, source: str,

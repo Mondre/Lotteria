@@ -10,6 +10,16 @@ CREATE TABLE IF NOT EXISTS draws (
     UNIQUE(game, variant, wheel, draw_id, synthetic)
 );
 CREATE INDEX IF NOT EXISTS draws_chronological ON draws(game,variant,wheel,synthetic,occurred_at);
+ALTER TABLE draws ADD COLUMN IF NOT EXISTS date_precision TEXT NOT NULL DEFAULT 'instant';
+CREATE TABLE IF NOT EXISTS source_updates (
+    source_key TEXT PRIMARY KEY, checked_at TEXT NOT NULL, details TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS experiments (
+    id TEXT PRIMARY KEY, operation TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL, finished_at TEXT NOT NULL, parameters TEXT NOT NULL,
+    result TEXT, error TEXT
+);
+CREATE INDEX IF NOT EXISTS experiments_created ON experiments(created_at,id);
 CREATE TABLE IF NOT EXISTS update_log (
     id BIGSERIAL PRIMARY KEY, created_at TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL
 );
@@ -34,4 +44,5 @@ FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
 DROP TRIGGER IF EXISTS results_immutable ON prediction_results;
 CREATE TRIGGER results_immutable BEFORE UPDATE OR DELETE ON prediction_results
 FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
-INSERT INTO schema_version(version) VALUES(2) ON CONFLICT DO NOTHING;
+DELETE FROM schema_version WHERE version=2;
+INSERT INTO schema_version(version) VALUES(3) ON CONFLICT DO NOTHING;

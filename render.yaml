@@ -19,4 +19,6 @@ services:
         value: "1"
       - key: OMP_NUM_THREADS
         value: "1"
+      - key: LOTTOPREDICT_OFFICIAL_SYNC_ENABLED
+        value: "false"
 # Nessun disco o database Render: persistenza su un progetto Neon esterno.

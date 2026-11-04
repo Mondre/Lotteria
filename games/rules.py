@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from games.models import Draw
 
@@ -34,6 +35,12 @@ class RuleRegistry:
             raise ValueError("La data deve includere il fuso orario")
         if draw.occurred_at > datetime.now(timezone.utc):
             raise ValueError("Estrazione nel futuro")
+        if draw.date_precision not in ("instant", "date"):
+            raise ValueError("Precisione della data non valida")
+        if draw.date_precision == "date":
+            local = draw.occurred_at.astimezone(ZoneInfo("Europe/Rome"))
+            if any((local.hour, local.minute, local.second, local.microsecond)):
+                raise ValueError("Una data senza orario deve usare mezzanotte Europe/Rome come riferimento")
         if len(draw.numbers) != rule["count"] or len(set(draw.numbers)) != len(draw.numbers):
             raise ValueError("Numerosità errata o numeri duplicati")
         if any(type(n) is not int or not rule["minimum"] <= n <= rule["maximum"] for n in draw.numbers):

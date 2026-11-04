@@ -133,6 +133,33 @@ class ExperimentTests(unittest.TestCase):
         for row in result["summary"]:
             self.assertEqual(sum(row["match_distribution"]), 60)
 
+    def test_model_selection_order_does_not_change_predictions_or_intervals(self):
+        first = walk_forward(self.draws[:65], self.rules, ("temporal", "logistic"), initial=50, retrain_every=10)
+        second = walk_forward(self.draws[:65], self.rules, ("logistic", "temporal"), initial=50, retrain_every=10)
+        for a, b in zip(first["steps"], second["steps"]):
+            self.assertEqual(a["models"], b["models"])
+        by_name = {row["model"]: row for row in first["summary"]}
+        for row in second["summary"]:
+            self.assertEqual(by_name[row["model"]], row)
+
+    def test_adding_model_preserves_uniform_and_frequency_baselines(self):
+        a = walk_forward(self.draws[:60], self.rules, (), initial=40)
+        b = walk_forward(self.draws[:60], self.rules, ("temporal",), initial=40)
+        for first, second in zip(a["steps"], b["steps"]):
+            for name in ("uniform", "frequency"):
+                self.assertEqual(first["models"][name], second["models"][name])
+        for name in ("uniform", "frequency"):
+            left = next(row for row in a["summary"] if row["model"] == name)
+            right = next(row for row in b["summary"] if row["model"] == name)
+            self.assertEqual(left["mean_ci95_bootstrap_iid"], right["mean_ci95_bootstrap_iid"])
+        self.assertEqual(b["model_names"], ["uniform", "frequency", "temporal"])
+
+    def test_training_requirements_are_checked_before_model_fit(self):
+        for names, initial, window in ((("random_forest",), 20, None), (("ensemble",), 80, None),
+                                       (("logistic",), 50, 20)):
+            with self.assertRaisesRegex(ValueError, "training"):
+                walk_forward(self.draws, self.rules, names, initial=initial, train_window=window)
+
 
 if __name__ == "__main__":
     unittest.main()

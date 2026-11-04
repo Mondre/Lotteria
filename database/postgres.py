@@ -65,7 +65,7 @@ class PostgresStore(Store):
                 exists = raw.execute("SELECT to_regclass('schema_version') AS name").fetchone()["name"]
                 if exists:
                     versions = raw.execute("SELECT version FROM schema_version").fetchall()
-                    if any(row["version"] != 2 for row in versions):
+                    if any(row["version"] not in (2, 3) for row in versions):
                         raise ValueError("Versione database PostgreSQL non supportata")
                 raw.execute(Path(__file__).with_name("postgres_schema.sql").read_text(encoding="utf-8"))
         except Exception:

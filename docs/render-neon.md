@@ -98,10 +98,12 @@ distribuire il commit con il bundle Certifi esplicito. Non impostare
 - I piani gratuiti possono sospendere app e database inattivi: il primo accesso
   può richiedere tempo. Quote e condizioni possono cambiare.
 - Render free non è un sistema di elaborazione durevole per lavori lunghi:
-  un riavvio può interrompere un calcolo. Tenere un solo worker; la coda e i
-  risultati non salvati sono in memoria e non vengono recuperati al riavvio.
-- Estrazioni, registro, previsioni salvate e relative corrispondenze sono invece
-  persistenti su Neon. Esportare i risultati degli esperimenti prima di riavviare.
+  un riavvio può interrompere un calcolo. Tenere un solo worker; i calcoli
+  incompleti vanno rilanciati e non vengono mostrati come completati.
+- Estrazioni, registro, previsioni, corrispondenze ed esperimenti scientifici
+  terminati sono persistenti su Neon. La cronologia conserva parametri,
+  risultati ed errori; le anteprime non vengono archiviate. Un risultato
+  scientifico viene indicato come completato solo dopo il salvataggio.
 - Il pool dell'app usa al massimo tre connessioni e le importazioni riusano una
   transazione per archivio. I limiti delle righe rimangono quelli documentati.
 - Gli archivi SQLite preesistenti **non vengono copiati automaticamente**.

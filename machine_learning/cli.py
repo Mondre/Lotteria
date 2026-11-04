@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--limit", type=int, default=1000)
     parser.add_argument("--model", choices=MODELS, default="frequency")
+    parser.add_argument("--models", choices=MODELS, nargs="*", help="Confronto backtest; lista vuota per sole baseline")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--initial", type=int, default=700)
     parser.add_argument("--train-window", type=int)
@@ -31,6 +32,8 @@ def main() -> int:
         parser.error("--target-id e --target-date devono essere usati insieme")
     if args.operation == "backtest" and args.target_id:
         parser.error("Un backtest non può salvare una previsione futura")
+    if args.operation != "backtest" and args.models is not None:
+        parser.error("--models è disponibile solo per il backtest")
     registry = RuleRegistry()
     store = Store(data_directory() / "lottopredict.sqlite3", registry)
     try:
@@ -40,7 +43,8 @@ def main() -> int:
             if args.target_id:
                 result["saved_id"] = save_prediction(store, result, args.target_id, datetime.fromisoformat(args.target_date))
         else:
-            result = walk_forward(draws, registry, (args.model,), args.initial, args.train_window, args.retrain_every, args.seed)
+            names = tuple(args.models) if args.models is not None else (args.model,)
+            result = walk_forward(draws, registry, names, args.initial, args.train_window, args.retrain_every, args.seed)
         print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2))
         return 0
     except (ValueError, KeyError) as error:

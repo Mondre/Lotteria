@@ -18,7 +18,7 @@ $('import-form').addEventListener('submit',async event=>{
  clear($('import-preview-counts'));
  for(const [key,label]of [['new','Nuove'],['duplicates','Duplicate'],['conflicts','In conflitto'],['invalid','Non valide']]){const card=node('div','preview-count');card.append(node('strong',null,nf.format(result[key])),node('span',null,label));$('import-preview-counts').append(card);}
  const classes={new:'Nuova',duplicates:'Duplicata',conflicts:'Conflitto',invalid:'Non valida'};
- clear($('import-preview-sample'));$('import-preview-sample').append(table(['Riga','Identificativo','Data','Numeri','Esito'],result.sample.map(row=>[row.row,row.draw_id||'—',row.occurred_at?dateLabel(row.occurred_at,true):'—',(row.numbers||[]).join(' · '),classes[row.classification]])));
+ clear($('import-preview-sample'));$('import-preview-sample').append(table(['Riga','Identificativo','Data','Numeri','Esito'],result.sample.map(row=>[row.row,row.draw_id||'—',row.occurred_at?dateLabel(row.occurred_at,row.date_precision!=='date'):'—',(row.numbers||[]).join(' · '),classes[row.classification]])));
  $('import-preview-errors').hidden=!result.errors.length;$('import-preview-errors').textContent=result.errors.join('\n');
  $('import-preview').hidden=false;$('confirm-import').disabled=result.new+result.duplicates===0;
  $('import-feedback').textContent=`${result.total} righe controllate. Nessun dato salvato. Archivio: ${synthetic?'sintetico':'reale'}. Anteprima delle prime 20 righe.`;
@@ -29,7 +29,7 @@ $('confirm-import').addEventListener('click',async()=>{
  const preview=importPreview;resetResult();$('import-feedback').textContent='Importazione in corso…';
  const job=await runJob(()=>api('/api/import?'+new URLSearchParams({format:preview.format,synthetic:preview.synthetic,expected_sha256:preview.sha256}),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:preview.file}));
  if(!job){$('import-feedback').textContent=$('status').textContent;return;}
- $('import-dialog').close();resetImportPreview();$('dataset').value=preview.synthetic?'synthetic':'real';await refresh();
+ $('import-dialog').close();resetImportPreview();$('dataset').value=preview.synthetic?'synthetic':'manual';await refresh();
  const report=job.result;
  message(`Importazione: ${report.inserted} aggiunte · ${report.duplicates} duplicate · ${report.rejected} rifiutate.${report.errors.length?' '+report.errors.join(' | '):''}`,report.rejected?'error':'success');
 });
@@ -48,7 +48,7 @@ $('manual-form').addEventListener('submit',async event=>{
  event.preventDefault();if(state.busy||!manualSelection)return;
  let numbers,extras;
  try{numbers=$('manual-numbers').value.trim().split(/[\s,;]+/).map(value=>{if(!/^\d+$/.test(value))throw new Error('Usa numeri interi separati da spazi, virgole o punto e virgola.');return Number(value);});extras=JSON.parse($('manual-extras').value);if(!extras||Array.isArray(extras)||typeof extras!=='object')throw new Error('Gli extra devono essere un oggetto JSON.');}catch(error){$('manual-feedback').textContent=error.message;return;}
- const {limit,...selected}=manualSelection;
+ const {limit,official_only,...selected}=manualSelection;
  busy(true);$('manual-feedback').textContent='Salvataggio in corso…';
- try{const result=await api('/api/draws',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...selected,draw_id:$('manual-id').value,occurred_at:$('manual-date').value,numbers,extras,source:$('manual-source').value})});$('manual-dialog').close();resetResult();await refresh();message(result.inserted?'Estrazione salvata. Le eventuali previsioni corrispondenti sono state valutate.':'Estrazione identica già presente: nessun dato modificato.','success');}catch(error){$('manual-feedback').textContent=error.message;}finally{busy(false);$('export').disabled=!state.result;}
+ try{const result=await api('/api/draws',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...selected,draw_id:$('manual-id').value,occurred_at:$('manual-date').value,numbers,extras,source:$('manual-source').value})});$('manual-dialog').close();$('dataset').value=manualSelection.synthetic?'synthetic':'manual';resetResult();await refresh();message(result.inserted?'Estrazione salvata. Le eventuali previsioni corrispondenti sono state valutate.':'Estrazione identica già presente: nessun dato modificato.','success');}catch(error){$('manual-feedback').textContent=error.message;}finally{busy(false);$('export').disabled=!state.result;}
 });

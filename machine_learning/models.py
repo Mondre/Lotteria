@@ -3,6 +3,11 @@ import numpy as np
 MODELS = ("uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "xgboost", "ensemble")
 
 
+def minimum_history(names) -> int:
+    return max((100 if name == "ensemble" else 40 if name in ("logistic", "random_forest", "gradient_boosting", "xgboost") else 2
+                for name in names), default=2)
+
+
 def features(history: np.ndarray) -> np.ndarray:
     if not len(history):
         raise ValueError("Storico vuoto")

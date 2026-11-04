@@ -13,3 +13,4 @@ class Draw:
     extras: dict[str, int] = field(default_factory=dict)
     synthetic: bool = False
     source: str = "manuale"
+    date_precision: str = "instant"

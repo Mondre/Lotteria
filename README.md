@@ -8,6 +8,13 @@ I punteggi dei modelli **non sono probabilità di vincita**.
 
 ## Versione web
 
+Il connettore automatico del Lotto è incluso ma disattivato per impostazione
+predefinita (`LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=false`): la pagina ufficiale è stata
+verificata, ma il download ZIP su un dominio distinto è tuttora bloccato dalla
+rete di sviluppo. Stato, funzionamento e limiti sono documentati in
+[docs/automatic-data.md](docs/automatic-data.md). I test usano fixture artificiali
+e non equivalgono a una verifica dello storico reale.
+
 La nuova interfaccia browser riutilizza database, importazione, statistiche,
 modelli e backtesting del desktop. Non richiede PySide6 e non scarica risorse
 da CDN. Include dashboard responsive, filtri per gioco/variante/ruota,
@@ -38,9 +45,14 @@ sono parziali e riportano righe aggiunte, duplicate e rifiutate. Le date nella
 UI sono visualizzate nel fuso Europe/Rome.
 
 La coda esegue una sola operazione per volta e accetta al massimo quattro
-operazioni in attesa/esecuzione. Conserva gli ultimi 20 risultati in memoria,
-che scadono al riavvio. Esportare in JSON i risultati da conservare. Estrazioni,
-registri e previsioni salvate rimangono invece nel database configurato. Una previsione può
+operazioni in attesa/esecuzione. La cache in memoria contiene gli ultimi 20 job,
+ma analisi, generazioni, backtest e simulazioni terminati sono salvati anche
+nel database, inclusi parametri ed eventuali errori. In **Esperimenti salvati**
+si possono filtrare, riaprire o rieseguire: una riesecuzione crea un nuovo
+risultato sui dati attuali e non modifica quello originale.
+I calcoli interrotti non ripartono automaticamente. Anteprime e rapporti di
+importazione restano temporanei: l'anteprima non scrive dati persistenti.
+Estrazioni, registri e previsioni rimangono nel database configurato. Una previsione può
 essere salvata solo da una generazione completata sul server, con ID e data
 futura; il browser non può sostituirne arbitrariamente il payload.
 
@@ -54,7 +66,8 @@ Il server controlla host e origine delle scritture. Render fornisce il proprio
 dominio tramite `RENDER_EXTERNAL_HOSTNAME`, accettato automaticamente;
 per domini aggiuntivi usare `LOTTOPREDICT_ALLOWED_HOSTS`, senza schemi o percorsi.
 La configurazione di deploy è descritta in [docs/render-neon.md](docs/render-neon.md).
-Non è ancora stato eseguito un deploy su un account Render/Neon reale.
+Il deploy Render/Neon è stato completato dall'utente; le nuove funzionalità
+in sviluppo restano locali fino a una pubblicazione esplicita.
 Non è presente un connettore remoto arbitrario nella UI web; la CLI resta locale.
 
 Test web (non richiedono un server avviato):
@@ -250,6 +263,10 @@ python -m machine_learning.cli backtest --game Lotto --variant ordinario --wheel
 ```
 
 Il walk-forward confronta sempre uniforme e frequenze oltre al modello scelto.
+La pagina **Confronto algoritmi** permette una selezione multipla sulla stessa
+serie e sugli stessi target, con tabella degli intervalli, differenze dalle
+baseline e grafico cumulativo interattivo. La selezione resta nella cronologia.
+Dettagli e limiti: [docs/model-comparison.md](docs/model-comparison.md).
 Ogni run è limitato a 5.000 target per contenere il costo dei test esatti.
 Training espansivo o `--train-window`; riaddestramento `--retrain-every` (default
 10); previsione di ogni target usando solo il passato. Le date devono essere

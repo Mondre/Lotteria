@@ -11,7 +11,7 @@ import unittest
 class WebTests(unittest.TestCase):
     def setUp(self):
         from unittest.mock import patch
-        self.environment = patch.dict("os.environ", {"RENDER": "", "LOTTOPREDICT_WEB_USERNAME": "", "LOTTOPREDICT_WEB_PASSWORD": "", "RENDER_EXTERNAL_HOSTNAME": ""})
+        self.environment = patch.dict("os.environ", {"RENDER": "", "LOTTOPREDICT_WEB_USERNAME": "", "LOTTOPREDICT_WEB_PASSWORD": "", "RENDER_EXTERNAL_HOSTNAME": "", "LOTTOPREDICT_OFFICIAL_SYNC_ENABLED": ""})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         from fastapi.testclient import TestClient
@@ -26,6 +26,9 @@ class WebTests(unittest.TestCase):
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
         self.headers = {"X-LottoPredict-Request": "1"}
+        self.sync_patch = patch("data_sources.sync.Synchronizer.ensure", return_value={"state": "stored"})
+        self.ensure_mock = self.sync_patch.start()
+        self.addCleanup(self.sync_patch.stop)
 
     def post(self, path, **kwargs):
         return self.client.post(path, headers=self.headers, **kwargs)
@@ -166,7 +169,7 @@ class WebTests(unittest.TestCase):
                                         "RENDER": "true", "RENDER_EXTERNAL_HOSTNAME": "example.onrender.com"}):
             app = create_app(self.store, allowed_hosts=["testserver"])
         with TestClient(app) as client:
-            for path in ("/", "/static/app.js", "/api/config", "/api/predictions", "/api/logs"):
+            for path in ("/", "/static/app.js", "/api/config", "/api/predictions", "/api/logs", "/api/experiments"):
                 self.assertEqual(client.get(path).status_code, 401)
             self.assertEqual(client.get("/api/health").status_code, 200)
             self.assertEqual(client.get("/api/config", auth=credentials).status_code, 200)
@@ -181,6 +184,117 @@ class WebTests(unittest.TestCase):
         with patch.dict("os.environ", {"RENDER": "true", "LOTTOPREDICT_WEB_USERNAME": "", "LOTTOPREDICT_WEB_PASSWORD": ""}):
             with self.assertRaisesRegex(ValueError, "USERNAME"):
                 create_app(self.store)
+
+    def test_real_analysis_updates_first_and_reuses_persistent_cache(self):
+        from tests.test_automatic_sources import fixture_archive
+        from data_sources.lotto_official import parse_archive
+        from unittest.mock import Mock
+        self.sync_patch.stop()
+        draws, metadata = parse_archive(fixture_archive(), self.store.rules)
+        fetcher = Mock(return_value=(draws, metadata))
+        self.app.state.synchronizer.fetcher = fetcher
+        self.app.state.synchronizer.enabled = True
+        first = self.wait_job(self.post("/api/jobs", json={"operation": "analyze"}))
+        self.assertEqual(first["status"], "completed", first)
+        self.assertEqual(first["result"]["draws"], 2)
+        self.assertEqual(first["result"]["data_update"]["state"], "updated")
+        self.assertEqual(self.store.count(), 22)
+        second = self.wait_job(self.post("/api/jobs", json={"operation": "generate"}))
+        self.assertEqual(second["result"]["data_update"]["state"], "cached")
+        self.assertEqual(fetcher.call_count, 1)
+        dashboard = self.client.get("/api/dashboard").json()
+        self.assertEqual(dashboard["latest"]["date_precision"], "date")
+        forced = self.wait_job(self.post("/api/sources/sync", json={}))
+        self.assertEqual(forced["status"], "completed")
+        self.assertEqual(fetcher.call_count, 2)
+
+    def test_synthetic_and_stored_modes_do_not_download(self):
+        self.demo()
+        result = self.wait_job(self.post("/api/jobs", json={"operation": "analyze", "synthetic": True}))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.ensure_mock.call_count, 0)
+        self.wait_job(self.post("/api/jobs", json={"operation": "generate", "auto_update": False}))
+        self.assertEqual(self.ensure_mock.call_count, 0)
+        self.assertEqual(self.post("/api/sources/sync", json={"synthetic": True}).status_code, 422)
+
+    def test_saved_generation_can_be_opened_and_used_after_restart(self):
+        from fastapi.testclient import TestClient
+        from database.store import Store
+        from games.rules import RuleRegistry
+        from web.app import create_app
+        self.demo()
+        generated = self.wait_job(self.post("/api/jobs", json={"operation": "generate", "synthetic": True}))
+        self.assertTrue(generated["persisted"])
+        reopened_store = Store(self.store.path, RuleRegistry())
+        with TestClient(create_app(reopened_store, allowed_hosts=["testserver"])) as client:
+            result = client.get("/api/jobs/" + generated["id"]).json()
+            self.assertEqual(result["result"], generated["result"])
+            self.assertEqual(result["request"]["seed"], 42)
+            listing = client.get("/api/experiments?operation=generate").json()
+            self.assertEqual(listing["total"], 1)
+            self.assertNotIn("result", listing["items"][0])
+            date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+            saved = client.post("/api/predictions", headers=self.headers,
+                                json={"job_id": generated["id"], "target_id": "after-restart", "target_date": date})
+            self.assertEqual(saved.status_code, 201)
+
+    def test_failed_calculation_is_stored_but_preview_does_not_create_history(self):
+        failed = self.wait_job(self.post("/api/jobs", json={"operation": "generate", "auto_update": False}))
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(self.client.get("/api/experiments").json()["total"], 1)
+        self.assertEqual(self.client.get("/api/experiments?operation=analyze").json()["total"], 0)
+        self.assertEqual(self.client.get("/api/experiments?limit=0").status_code, 422)
+        self.assertEqual(self.client.get("/api/experiments?operation=unknown").status_code, 422)
+
+    def test_database_save_failure_is_not_reported_as_persisted_success(self):
+        from unittest.mock import patch
+        self.demo()
+        with patch.object(self.store, "save_experiment", side_effect=OSError("Test database offline")), self.assertLogs(level="ERROR"):
+            result = self.wait_job(self.post("/api/jobs", json={"operation": "generate", "synthetic": True}))
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["persisted"])
+        self.assertNotIn("result", result)
+        self.assertEqual(self.client.get("/api/experiments").json()["total"], 0)
+
+    def test_multimodel_comparison_is_saved_with_one_common_test(self):
+        self.demo()
+        result = self.wait_job(self.post("/api/jobs", json={"operation": "backtest", "synthetic": True,
+                                                          "models": ["temporal"], "initial": 700}))
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(result["result"]["model_names"], ["uniform", "frequency", "temporal"])
+        self.assertEqual(result["result"]["test_steps"], 300)
+        self.assertTrue(all(len(step["models"]) == 3 for step in result["result"]["steps"]))
+        saved = self.store.experiment(result["id"])
+        self.assertEqual(saved["request"]["models"], ["temporal"])
+        self.assertEqual(saved["result"], result["result"])
+
+    def test_comparison_validation_does_not_download_or_start_jobs(self):
+        invalid = [{"operation": "generate", "models": ["temporal"]},
+                   {"operation": "backtest", "models": ["temporal", "temporal"]},
+                   {"operation": "backtest", "models": ["unknown"]},
+                   {"operation": "backtest", "models": ["random_forest"], "initial": 20},
+                   {"operation": "backtest", "models": ["ensemble"], "initial": 80},
+                   {"operation": "backtest", "models": ["logistic"], "train_window": 20}]
+        for body in invalid:
+            with self.subTest(body=body):
+                self.assertEqual(self.post("/api/jobs", json=body).status_code, 422)
+        self.assertEqual(self.ensure_mock.call_count, 0)
+        self.assertEqual(self.store.list_experiments()["total"], 0)
+
+    def test_baselines_only_comparison_is_supported(self):
+        self.demo()
+        result = self.wait_job(self.post("/api/jobs", json={"operation": "backtest", "synthetic": True, "models": []}))
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(result["result"]["model_names"], ["uniform", "frequency"])
+
+    def test_unverified_official_source_is_disabled_by_default(self):
+        from unittest.mock import Mock
+        self.sync_patch.stop()
+        self.app.state.synchronizer.fetcher = Mock(side_effect=AssertionError("Nessun download atteso"))
+        self.assertFalse(self.client.get("/api/config").json()["official_sync_enabled"])
+        self.assertEqual(self.post("/api/sources/sync", json={}).status_code, 409)
+        self.wait_job(self.post("/api/jobs", json={"operation": "generate"}))
+        self.assertEqual(self.app.state.synchronizer.fetcher.call_count, 0)
 
 
 if __name__ == "__main__":

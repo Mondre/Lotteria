@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS draws (
     numbers TEXT NOT NULL, extras TEXT NOT NULL,
     synthetic INTEGER NOT NULL CHECK(synthetic IN (0,1)), source TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    date_precision TEXT NOT NULL DEFAULT 'instant',
     UNIQUE(game, variant, wheel, draw_id, synthetic)
 );
 CREATE INDEX IF NOT EXISTS draws_chronological
@@ -45,7 +46,16 @@ CREATE TRIGGER IF NOT EXISTS results_immutable_update BEFORE UPDATE ON predictio
 BEGIN SELECT RAISE(ABORT, 'Risultato immutabile'); END;
 CREATE TRIGGER IF NOT EXISTS results_immutable_delete BEFORE DELETE ON prediction_results
 BEGIN SELECT RAISE(ABORT, 'Risultato immutabile'); END;
-PRAGMA user_version = 2;
+CREATE TABLE IF NOT EXISTS source_updates (
+    source_key TEXT PRIMARY KEY, checked_at TEXT NOT NULL, details TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS experiments (
+    id TEXT PRIMARY KEY, operation TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL, finished_at TEXT NOT NULL, parameters TEXT NOT NULL,
+    result TEXT, error TEXT
+);
+CREATE INDEX IF NOT EXISTS experiments_created ON experiments(created_at,id);
+PRAGMA user_version = 3;
 """
 
 
@@ -58,8 +68,11 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise ValueError("Versione database non supportata")
+            columns = connection.execute("PRAGMA table_info(draws)").fetchall()
+            if columns and "date_precision" not in {row["name"] for row in columns}:
+                connection.execute("ALTER TABLE draws ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'instant'")
             connection.executescript(SCHEMA)
 
     @contextmanager
@@ -91,11 +104,11 @@ class Store:
                     raise ValueError("Identificativo esistente con contenuto diverso: nessuna sovrascrittura")
                 return False
             cursor = connection.execute(
-                "INSERT INTO draws(game,variant,wheel,draw_id,occurred_at,numbers,extras,synthetic,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id",
+                "INSERT INTO draws(game,variant,wheel,draw_id,occurred_at,numbers,extras,synthetic,source,created_at,date_precision) VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
                 (draw.game, draw.variant, draw.wheel, draw.draw_id,
                  draw.occurred_at.astimezone(timezone.utc).isoformat(),
                  json.dumps(draw.numbers), json.dumps(draw.extras), draw.synthetic,
-                 draw.source, datetime.now(timezone.utc).isoformat()),
+                 draw.source, datetime.now(timezone.utc).isoformat(), draw.date_precision),
             )
             draw_row_id = cursor.fetchone()["id"]
             connection.execute("INSERT INTO update_log(created_at,level,message) VALUES(?,?,?)",
@@ -141,11 +154,12 @@ class Store:
     def from_row(row) -> Draw:
         return Draw(row["game"], row["variant"], row["draw_id"],
                     datetime.fromisoformat(row["occurred_at"]), tuple(json.loads(row["numbers"])),
-                    row["wheel"], json.loads(row["extras"]), bool(row["synthetic"]), row["source"])
+                    row["wheel"], json.loads(row["extras"]), bool(row["synthetic"]), row["source"], row["date_precision"])
 
     @staticmethod
     def same_content(left: Draw, right: Draw) -> bool:
-        return left.occurred_at == right.occurred_at and left.numbers == right.numbers and left.extras == right.extras
+        return (left.occurred_at == right.occurred_at and left.numbers == right.numbers
+                and left.extras == right.extras and left.date_precision == right.date_precision)
 
     def existing_draws(self, draws: list[Draw]) -> dict[tuple, Draw]:
         """Lookup in blocchi compatibili con SQLite e PostgreSQL, senza scritture."""
@@ -165,6 +179,19 @@ class Store:
                         draw = self.from_row(row)
                         found[(draw.game, draw.variant, draw.wheel, draw.draw_id, draw.synthetic)] = draw
         return found
+
+    def history_by_ids(self, game: str, variant: str, wheel: str, identifiers: list[str], limit: int) -> list[Draw]:
+        """Solo concorsi attestati dalla sincronizzazione: esclude copie manuali con altri ID."""
+        if not 1 <= limit <= 10000 or len(identifiers) > 10000:
+            raise ValueError("Finestra della fonte non valida")
+        rows = []
+        with self.connect() as connection:
+            for offset in range(0, len(identifiers), 200):
+                batch = identifiers[offset:offset + 200]
+                query = ("SELECT * FROM draws WHERE game=? AND variant=? AND wheel=? AND synthetic=0 "
+                         "AND draw_id IN (" + ",".join("?" for _ in batch) + ")")
+                rows.extend(connection.execute(query, [game, variant, wheel, *batch]).fetchall())
+        return sorted((self.from_row(row) for row in rows), key=lambda draw: (draw.occurred_at, draw.draw_id))[-limit:]
 
     def save_prediction(self, payload: dict, target_id: str, target_date: datetime) -> str:
         import uuid
@@ -203,9 +230,15 @@ class Store:
                                   (draw.game, draw.variant, draw.wheel, draw.draw_id, draw.synthetic)).fetchall()
         for row in rows:
             payload = json.loads(row["payload"])
+            target = datetime.fromisoformat(row["target_date"])
+            if draw.date_precision == "date":
+                from zoneinfo import ZoneInfo
+                matches_date = target.astimezone(ZoneInfo("Europe/Rome")).date() == draw.occurred_at.astimezone(ZoneInfo("Europe/Rome")).date()
+            else:
+                matches_date = target == draw.occurred_at
             if (datetime.fromisoformat(row["created_at"]) >= draw.occurred_at
                     or datetime.fromisoformat(payload["train_end"]) >= draw.occurred_at
-                    or datetime.fromisoformat(row["target_date"]) != draw.occurred_at):
+                    or not matches_date):
                 continue
             matches = [len(set(ticket["numbers"]) & set(draw.numbers)) for ticket in payload["tickets"]]
             connection.execute("INSERT INTO prediction_results VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
@@ -213,9 +246,77 @@ class Store:
 
     def prediction_history(self) -> list[dict]:
         with self.connect() as connection:
-            rows = connection.execute("SELECT p.*,r.matches FROM predictions p LEFT JOIN prediction_results r "
-                                      "ON p.id=r.prediction_id ORDER BY p.created_at DESC LIMIT 1000").fetchall()
-        return [dict(row) for row in rows]
+            rows = connection.execute("SELECT p.*,r.matches,d.occurred_at AS result_date,d.date_precision AS result_precision "
+                                      "FROM predictions p LEFT JOIN prediction_results r ON p.id=r.prediction_id "
+                                      "LEFT JOIN draws d ON d.game=p.game AND d.variant=p.variant AND d.wheel=p.wheel "
+                                      "AND d.synthetic=p.synthetic AND d.draw_id=p.target_id "
+                                      "ORDER BY p.created_at DESC LIMIT 1000").fetchall()
+        result = []
+        for raw in rows:
+            row = dict(raw)
+            if row["matches"] is not None:
+                status = "evaluated"
+            elif row["result_date"] is None:
+                status = "awaiting"
+            elif row["result_precision"] == "date":
+                status = "unscorable_time"
+            else:
+                status = "unmatched"
+            row["evaluation_status"] = status
+            result.append(row)
+        return result
+
+    def sync_info(self, key: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM source_updates WHERE source_key=?", (key,)).fetchone()
+        return {"checked_at": row["checked_at"], **json.loads(row["details"])} if row else None
+
+    def save_sync_info(self, key: str, details: dict) -> None:
+        with self.connect() as connection:
+            connection.execute("INSERT INTO source_updates(source_key,checked_at,details) VALUES(?,?,?) "
+                               "ON CONFLICT(source_key) DO UPDATE SET checked_at=excluded.checked_at,details=excluded.details",
+                               (key, datetime.now(timezone.utc).isoformat(), json.dumps(details, allow_nan=False)))
+
+    def save_experiment(self, identifier: str, operation: str, status: str, parameters: dict,
+                        created_at: str, result=None, error: str | None = None) -> None:
+        if operation not in ("analyze", "generate", "backtest", "simulate") or status not in ("completed", "failed"):
+            raise ValueError("Tipo o stato esperimento non valido")
+        with self.connect() as connection:
+            connection.execute("INSERT INTO experiments VALUES(?,?,?,?,?,?,?,?)",
+                               (identifier, operation, status, created_at, datetime.now(timezone.utc).isoformat(),
+                                json.dumps(parameters, allow_nan=False),
+                                json.dumps(result, allow_nan=False) if result is not None else None, error))
+
+    @staticmethod
+    def experiment_from_row(raw) -> dict:
+        row = dict(raw)
+        row["request"] = json.loads(row.pop("parameters"))
+        if "result" in row:
+            if row["result"] is not None:
+                row["result"] = json.loads(row["result"])
+            else:
+                del row["result"]
+        row["persisted"] = True
+        return row
+
+    def experiment(self, identifier: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM experiments WHERE id=?", (identifier,)).fetchone()
+        return self.experiment_from_row(row) if row else None
+
+    def list_experiments(self, limit: int = 30, offset: int = 0, operation: str | None = None) -> dict:
+        if not 1 <= limit <= 100 or not 0 <= offset <= 100000:
+            raise ValueError("Paginazione non valida")
+        if operation is not None and operation not in ("analyze", "generate", "backtest", "simulate"):
+            raise ValueError("Tipo esperimento non valido")
+        with self.connect() as connection:
+            rows = connection.execute("SELECT id,operation,status,created_at,finished_at,parameters,error "
+                                      "FROM experiments WHERE (CAST(? AS TEXT) IS NULL OR operation=?) "
+                                      "ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+                                      (operation, operation, limit, offset)).fetchall()
+            total = connection.execute("SELECT COUNT(*) AS total FROM experiments "
+                                       "WHERE (CAST(? AS TEXT) IS NULL OR operation=?)", (operation, operation)).fetchone()["total"]
+        return {"items": [self.experiment_from_row(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
     def begin_write(self, connection) -> None:
         if not connection.in_transaction:

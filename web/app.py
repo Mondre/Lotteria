@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 import base64
 import binascii
 from contextlib import asynccontextmanager
@@ -6,26 +5,26 @@ from dataclasses import asdict
 from datetime import datetime
 import json
 import hashlib
-import logging
 import os
 import secrets
 from pathlib import Path
-from threading import Lock
 from typing import Literal
 from urllib.parse import urlsplit
-import uuid
 
 from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, AwareDatetime, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, AwareDatetime, StrictInt, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from database.factory import create_store
 from database.store import Store
+from data_sources.sync import Synchronizer, KEY as LOTTO_SOURCE_KEY
 from games.rules import RuleRegistry
+from web.jobs import Jobs
 
 STATIC = Path(__file__).parent / "static"
+ModelName = Literal["uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "ensemble"]
 
 
 class Selection(BaseModel):
@@ -35,16 +34,33 @@ class Selection(BaseModel):
     wheel: str = "Roma"
     synthetic: bool = False
     limit: int = Field(default=1000, ge=1, le=10000)
+    official_only: bool = False
 
 
 class Experiment(Selection):
     operation: Literal["analyze", "generate", "backtest", "simulate"]
-    model: Literal["uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "ensemble"] = "frequency"
+    model: ModelName = "frequency"
+    models: list[ModelName] | None = Field(default=None, max_length=7)
     combinations: int = Field(default=5, ge=1, le=100)
     initial: int = Field(default=700, ge=2, le=9999)
     train_window: int | None = Field(default=None, ge=2, le=10000)
     retrain_every: int = Field(default=10, ge=1, le=1000)
     seed: int = Field(default=42, ge=0, le=2147483647)
+    auto_update: bool = True
+
+    @model_validator(mode="after")
+    def validate_models(self):
+        if self.models is not None:
+            if self.operation != "backtest":
+                raise ValueError("Il confronto multimodello è disponibile solo per il backtesting")
+            if len(set(self.models)) != len(self.models):
+                raise ValueError("Selezionare ogni modello una sola volta")
+        if self.operation == "backtest":
+            from machine_learning.models import minimum_history
+            required = minimum_history(self.models if self.models is not None else [self.model])
+            if min(self.initial, self.train_window or self.initial) < required:
+                raise ValueError(f"Servono almeno {required} estrazioni per il training dei modelli selezionati")
+        return self
 
 
 class SavePrediction(BaseModel):
@@ -67,50 +83,9 @@ class ManualDraw(BaseModel):
     source: str = Field(min_length=1, max_length=200)
 
 
-class Jobs:
-    def __init__(self):
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lotto-web")
-        self.lock = Lock()
-        self.items = {}
 
-    def submit(self, operation, function):
-        with self.lock:
-            if sum(item["status"] in ("queued", "running") for item in self.items.values()) >= 4:
-                raise HTTPException(429, "Sono già in corso troppe operazioni. Attendere.")
-            while len(self.items) >= 20:
-                completed = next((key for key, item in self.items.items() if item["status"] in ("completed", "failed")), None)
-                if completed is None:
-                    break
-                del self.items[completed]
-            key = str(uuid.uuid4())
-            self.items[key] = {"id": key, "operation": operation, "status": "queued"}
-        self.pool.submit(self.run, key, function)
-        return {"id": key, "status": "queued"}
-
-    def run(self, key, function):
-        with self.lock:
-            self.items[key]["status"] = "running"
-        try:
-            result = function()
-            # Non consegnare al client dati con NaN/Inf o non serializzabili.
-            json.dumps(result, allow_nan=False)
-            update = {"status": "completed", "result": result}
-        except ValueError as error:
-            update = {"status": "failed", "error": str(error)[:1000]}
-        except Exception:
-            logging.exception("Operazione web fallita")
-            update = {"status": "failed", "error": "Operazione non riuscita. Controllare il formato del file e le dipendenze del server."}
-        with self.lock:
-            self.items[key].update(update)
-
-    def get(self, key):
-        with self.lock:
-            if key not in self.items:
-                raise HTTPException(404, "Operazione non trovata o scaduta")
-            return dict(self.items[key])
-
-
-def create_app(store: Store | None = None, allowed_hosts: list[str] | None = None) -> FastAPI:
+def create_app(store: Store | None = None, allowed_hosts: list[str] | None = None,
+               synchronizer: Synchronizer | None = None) -> FastAPI:
     username = os.environ.get("LOTTOPREDICT_WEB_USERNAME", "")
     password = os.environ.get("LOTTOPREDICT_WEB_PASSWORD", "")
     public = os.environ.get("RENDER") == "true"
@@ -125,7 +100,8 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
     if public and "*" in hosts:
         raise ValueError("Su Render configurare host espliciti, non '*'")
     store = store or create_store()
-    jobs = Jobs()
+    synchronizer = synchronizer or Synchronizer(store, enabled=os.environ.get("LOTTOPREDICT_OFFICIAL_SYNC_ENABLED") == "true")
+    jobs = Jobs(store)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -137,6 +113,7 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
 
     app = FastAPI(title="LottoPredict AI", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store, app.state.jobs = store, jobs
+    app.state.synchronizer = synchronizer
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.middleware("http")
@@ -190,15 +167,18 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
 
     @app.get("/api/config")
     def config():
-        return {"storage": store.backend, "rules": list(store.rules.rules.values()), "models": ["uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "ensemble"]}
+        return {"storage": store.backend, "official_sync_enabled": synchronizer.enabled,
+                "rules": list(store.rules.rules.values()), "models": ["uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "ensemble"]}
 
     @app.get("/api/dashboard")
-    def dashboard(game: str = "Lotto", variant: str = "ordinario", wheel: str = "Roma", synthetic: bool = False, limit: int = 1000):
+    def dashboard(game: str = "Lotto", variant: str = "ordinario", wheel: str = "Roma", synthetic: bool = False,
+                  limit: int = 1000, official_only: bool = False):
         if not 1 <= limit <= 10000:
             raise HTTPException(422, "Limite da 1 a 10.000")
         selection = Selection(game=game, variant=variant, wheel=wheel, synthetic=synthetic, limit=limit)
         validate_selection(selection)
-        history = store.history(game, variant, wheel, synthetic, limit)
+        history = (synchronizer.history(game, variant, wheel, limit) if official_only and not synthetic
+                   else store.history(game, variant, wheel, synthetic, limit))
         frequency = []
         if history:
             from collections import Counter
@@ -209,6 +189,10 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
                 "selected_count": len(history), "synthetic": synthetic,
                 "latest": asdict(history[-1]) if history else None,
                 "frequency": frequency, "draws": [asdict(draw) for draw in reversed(history[-100:])],
+                "data_source": {"automatic": synchronizer.enabled and Synchronizer.supported(game, variant),
+                                "scope": "official" if official_only else "archive",
+                                "last_sync": {key: value for key, value in (store.sync_info(LOTTO_SOURCE_KEY) or {}).items()
+                                              if key != "covered_days"} if Synchronizer.supported(game, variant) else None},
                 "rules_verified": store.rules.rules[(game, variant)]["verified"]}
 
     @app.post("/api/demo", status_code=202)
@@ -250,10 +234,12 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
 
     @app.get("/api/archive/export")
     def export_archive(game: str = "Lotto", variant: str = "ordinario", wheel: str = "Roma", synthetic: bool = False,
-                       limit: int = Query(default=1000, ge=1, le=10000)):
+                       limit: int = Query(default=1000, ge=1, le=10000), official_only: bool = False):
         validate_selection(Selection(game=game, variant=variant, wheel=wheel, synthetic=synthetic, limit=limit))
         rows = []
-        for draw in store.history(game, variant, wheel, synthetic, limit):
+        history = (synchronizer.history(game, variant, wheel, limit) if official_only and not synthetic
+                   else store.history(game, variant, wheel, synthetic, limit))
+        for draw in history:
             row = asdict(draw)
             row["occurred_at"] = draw.occurred_at.isoformat()
             rows.append(row)
@@ -278,21 +264,47 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
             if selection.operation == "simulate":
                 from lotto_statistics.engine import monte_carlo
                 return monte_carlo(store.rules, selection.game, selection.variant, seed=selection.seed)
-            history = store.history(selection.game, selection.variant, selection.wheel, selection.synthetic, selection.limit)
+            update = {"state": "synthetic" if selection.synthetic else "stored"}
+            if not selection.synthetic and selection.auto_update:
+                update = synchronizer.ensure(selection.game, selection.variant, selection.wheel, selection.limit)
+            history = (synchronizer.history(selection.game, selection.variant, selection.wheel, selection.limit)
+                       if not selection.synthetic and (selection.official_only or update["state"] in ("updated", "cached"))
+                       else store.history(selection.game, selection.variant, selection.wheel, selection.synthetic, selection.limit))
             if selection.operation == "analyze":
                 from lotto_statistics.engine import analyze
-                return analyze(history, store.rules)
-            if selection.operation == "generate":
+                result = analyze(history, store.rules)
+            elif selection.operation == "generate":
                 from predictions.engine import generate
-                return generate(history, store.rules, selection.model, selection.combinations, selection.seed)
-            from backtesting.engine import walk_forward
-            return walk_forward(history, store.rules, (selection.model,), selection.initial,
-                                selection.train_window, selection.retrain_every, selection.seed)
-        return jobs.submit(selection.operation, operation)
+                result = generate(history, store.rules, selection.model, selection.combinations, selection.seed)
+            else:
+                from backtesting.engine import walk_forward
+                names = tuple(selection.models) if selection.models is not None else (selection.model,)
+                result = walk_forward(history, store.rules, names, selection.initial,
+                                      selection.train_window, selection.retrain_every, selection.seed)
+            return {**result, "data_update": {key: value for key, value in update.items() if key != "covered_days"}}
+        return jobs.submit(selection.operation, operation, selection.model_dump(mode="json"))
+
+    @app.post("/api/sources/sync", status_code=202)
+    def sync_source(selection: Selection):
+        validate_selection(selection)
+        if selection.synthetic or not Synchronizer.supported(selection.game, selection.variant):
+            raise HTTPException(422, "Aggiornamento ufficiale disponibile soltanto per Lotto reale")
+        if not synchronizer.enabled:
+            raise HTTPException(409, "Download ufficiale ancora in verifica: aggiornamento automatico non attivato.")
+        return jobs.submit("sync", lambda: synchronizer.ensure(selection.game, selection.variant, selection.wheel,
+                                                               selection.limit, force=True))
 
     @app.get("/api/jobs/{key}")
     def job(key: str):
         return jobs.get(key)
+
+    @app.get("/api/experiments")
+    def experiments(limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0, le=100000),
+                    operation: Literal["analyze", "generate", "backtest", "simulate"] | None = None):
+        try:
+            return store.list_experiments(limit, offset, operation)
+        except Exception:
+            raise HTTPException(503, "Impossibile caricare gli esperimenti: riprovare quando il database è disponibile.") from None
 
     @app.post("/api/predictions", status_code=201)
     def persist(body: SavePrediction):
