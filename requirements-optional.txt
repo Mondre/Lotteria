@@ -1,0 +1,2 @@
+# Modello opzionale: non necessario per l'avvio o per le baseline.
+xgboost>=2.1,<4

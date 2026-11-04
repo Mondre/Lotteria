@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: lottopredict-ai
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: uvicorn web.app:create_app --factory --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: DATABASE_URL
+        sync: false
+      - key: LOTTOPREDICT_WEB_USERNAME
+        sync: false
+      - key: LOTTOPREDICT_WEB_PASSWORD
+        sync: false
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+# Nessun disco o database Render: persistenza su un progetto Neon esterno.

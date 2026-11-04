@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {"game": "Lotto", "variant": "ordinario", "minimum": 1, "maximum": 90, "count": 5, "wheels": ["Bari", "Cagliari", "Firenze", "Genova", "Milano", "Napoli", "Palermo", "Roma", "Torino", "Venezia", "Nazionale"], "extras": {}, "verified": false},
+    {"game": "SuperEnalotto", "variant": "ordinario", "minimum": 1, "maximum": 90, "count": 6, "wheels": [], "extras": {"jolly": {"minimum": 1, "maximum": 90, "distinct_main": true}, "superstar": {"minimum": 1, "maximum": 90, "distinct_main": false}}, "verified": false},
+    {"game": "10eLotto", "variant": "ogni_5_minuti", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
+    {"game": "10eLotto", "variant": "legata_al_lotto", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
+    {"game": "10eLotto", "variant": "immediata", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
+    {"game": "Win for Life", "variant": "classico", "minimum": 1, "maximum": 20, "count": 10, "wheels": [], "extras": {"numerone": {"minimum": 1, "maximum": 20, "distinct_main": false}}, "verified": false},
+    {"game": "MillionDAY", "variant": "ordinario", "minimum": 1, "maximum": 55, "count": 5, "wheels": [], "extras": {}, "verified": false}
+  ]
+}
