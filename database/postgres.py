@@ -1,5 +1,6 @@
 """Backend PostgreSQL/Neon: stesso dominio e transazioni del backend SQLite."""
 from contextlib import contextmanager
+import os
 from pathlib import Path
 
 from database.store import Store
@@ -18,7 +19,15 @@ def connection_options(dsn: str) -> dict:
     # I soli test locali possono usare socket Unix/TCP senza TLS.
     local = host in ("localhost", "127.0.0.1", "::1") or host.startswith("/")
     if not local:
-        options.update(sslmode="verify-full", sslrootcert="system")
+        import certifi
+        # libpq del wheel binario può cercare le CA in percorsi non presenti su Render.
+        # Un bundle esplicito evita di dipendere dai percorsi OpenSSL del sistema.
+        root = options.get("sslrootcert") or os.environ.get("PGSSLROOTCERT") or certifi.where()
+        if root != "system":
+            root = str(Path(root).expanduser())
+            if not Path(root).is_file():
+                raise ValueError("Il bundle CA PostgreSQL configurato non è disponibile")
+        options.update(sslmode="verify-full", sslrootcert=root)
     options["connect_timeout"] = "10"
     return options
 

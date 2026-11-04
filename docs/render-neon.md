@@ -18,7 +18,10 @@ dei piani gratuiti nelle due dashboard prima di confermare.
 
 L'app richiede un URL `postgresql://...` o `postgres://...`. Preservare i
 parametri forniti da Neon, incluso `sslmode`. Per host remoti il driver impone
-TLS con verifica del certificato e del nome host (`verify-full`, CA di sistema).
+TLS con verifica del certificato e del nome host (`verify-full`). Il bundle CA
+esplicito di Certifi evita che il driver binario cerchi certificati in percorsi
+OpenSSL assenti su Render. Un `sslrootcert` esplicito o `PGSSLROOTCERT` viene
+rispettato; il file indicato deve essere disponibile nel servizio.
 Il ruolo deve poter creare tabelle, indici, funzioni e trigger nel database
 dedicato. L'app inizializza lo schema al primo avvio e controlla la versione.
 
@@ -85,6 +88,10 @@ Verificare:
 L'app non usa SQLite su Render se manca `DATABASE_URL`: si arresta con un
 messaggio di configurazione, così non dà una falsa impressione di persistenza.
 Un errore TLS o di accesso non attiva fallback o disabilita verifiche.
+
+Se i log di un vecchio deploy mostrano `SSL error: certificate verify failed`,
+distribuire il commit con il bundle Certifi esplicito. Non impostare
+`sslmode=disable` e non rimuovere la verifica del certificato per risolvere il problema.
 
 ## Limiti e dati esistenti
 

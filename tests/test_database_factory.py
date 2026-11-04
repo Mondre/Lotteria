@@ -32,6 +32,25 @@ class FactoryTests(unittest.TestCase):
         from database.postgres import connection_options
         remote = connection_options("postgresql://user:example@ep-test-pooler.eu-central-1.aws.neon.tech/db?sslmode=disable")
         self.assertEqual(remote["sslmode"], "verify-full")
-        self.assertEqual(remote["sslrootcert"], "system")
+        import certifi
+        import ssl
+        self.assertEqual(remote["sslrootcert"], certifi.where())
+        context = ssl.create_default_context(cafile=remote["sslrootcert"])
+        self.assertTrue(context.check_hostname)
+        self.assertGreater(context.cert_store_stats()["x509_ca"], 0)
         local = connection_options("postgresql://user@127.0.0.1:55432/db?sslmode=disable")
         self.assertEqual(local["sslmode"], "disable")
+
+    @unittest.skipUnless(importlib.util.find_spec("psycopg"), "Driver PostgreSQL non installato")
+    def test_explicit_postgres_ca_is_preserved_and_missing_ca_rejected(self):
+        import certifi
+        from psycopg.conninfo import make_conninfo
+        from database.postgres import connection_options
+        dsn = "postgresql://user:example@db.example.test/database"
+        explicit = make_conninfo(dsn, sslrootcert=certifi.where())
+        self.assertEqual(connection_options(explicit)["sslrootcert"], certifi.where())
+        with patch.dict(os.environ, {"PGSSLROOTCERT": certifi.where()}):
+            self.assertEqual(connection_options(dsn)["sslrootcert"], certifi.where())
+        with patch.dict(os.environ, {"PGSSLROOTCERT": "/nonexistent/postgresql-ca.pem"}):
+            with self.assertRaisesRegex(ValueError, "bundle CA"):
+                connection_options(dsn)

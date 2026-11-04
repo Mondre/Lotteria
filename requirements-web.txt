@@ -12,3 +12,4 @@ joblib==1.5.3
 threadpoolctl==3.6.0
 psycopg[binary,pool]==3.3.8
 psycopg-pool==3.3.3
+certifi==2026.10.23
