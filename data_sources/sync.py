@@ -2,14 +2,14 @@
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 
-from data_sources.lotto_official import fetch_archive, PAGE, ARCHIVE
+from data_sources.lotto_official import PAGE, ARCHIVE
 from database.store import Store
 
 KEY = "official:lotto:ordinario"
 
 
 class Synchronizer:
-    def __init__(self, store: Store, fetcher=fetch_archive, enabled: bool = True):
+    def __init__(self, store: Store, fetcher=None, enabled: bool = True):
         self.store, self.fetcher = store, fetcher
         self.enabled = enabled
         self.lock = Lock()
@@ -27,10 +27,10 @@ class Synchronizer:
 
     def ensure(self, game: str, variant: str, wheel: str, limit: int = 1000, force: bool = False) -> dict:
         if not self.enabled:
-            return {"state": "disabled", "message": "Download ufficiale ancora in verifica: aggiornamento automatico non attivato."}
+            return {"state": "disabled", "message": "Aggiornamento ufficiale disattivato nella configurazione."}
         if not self.supported(game, variant):
             return {"state": "unsupported", "message": "Fonte automatica non ancora verificata per questo gioco: si usa l'archivio disponibile."}
-        requested = max(1000, limit)
+        requested = limit
         with self.lock:
             previous = self.store.sync_info(KEY)
             if (not force and previous and previous.get("requested", 0) >= requested
@@ -38,7 +38,11 @@ class Synchronizer:
                     and self.history(game, variant, wheel, 1)):
                 return {**previous, "state": "cached"}
             try:
-                draws, metadata = self.fetcher(self.store.rules, requested)
+                if self.fetcher is None:
+                    from data_sources.lotto_api import ApiHistory
+                    draws, metadata = ApiHistory(self.store).fetch(self.store.rules, requested)
+                else:
+                    draws, metadata = self.fetcher(self.store.rules, requested)
                 # Anche fetcher alternativi devono fornire esclusivamente Lotto reale validato.
                 for draw in draws:
                     if draw.synthetic or (draw.game, draw.variant) != (game, variant):
@@ -56,7 +60,7 @@ class Synchronizer:
                     if old is None:
                         new.append(draw)
                 with self.store.batch():
-                    inserted = sum(self.store.add_draw(draw) for draw in new)
+                    inserted = sum(self.store.add_draw(draw) for draw in new) + metadata.get("progressive_inserted", 0)
                     details = {"source_page": PAGE, "source_url": ARCHIVE, **metadata, "requested": requested, "inserted": inserted,
                                "duplicates": len(draws) - inserted, "state": "updated"}
                     self.store.save_sync_info(KEY, details)
@@ -65,4 +69,4 @@ class Synchronizer:
             except Exception as error:
                 detail = str(error)[:500] if type(error) is ValueError else type(error).__name__
                 self.store.log("ERROR", f"Aggiornamento ufficiale fallito ({detail})")
-                raise ValueError("Aggiornamento ufficiale non riuscito. Nessun dato sintetico è stato usato: verificare rete, disponibilità e formato della fonte.") from None
+                raise ValueError("Aggiornamento ufficiale non riuscito. " + (detail if isinstance(error, ValueError) else "Verificare rete e disponibilità della fonte.") + " Nessun dato sintetico usato.") from None

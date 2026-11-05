@@ -1,100 +1,62 @@
-# Aggiornamento automatico — attivazione sospesa fino alla verifica reale
+# Aggiornamento automatico Lotto
 
-## Stato della verifica
+Il connettore corrente usa i servizi pubblici della pagina ufficiale
+https://www.lotto-italia.it/lotto/estratti-ruote, sul dominio già consentito.
+Il 5 novembre 2026 sono stati validati **500 concorsi completi per ruota**:
+5.500 estrazioni reali, dal 13 giugno 2024 al 3 novembre 2026, in un database
+di test separato. La richiesta da 1.000 è stata interrotta quando la fonte
+non ha restituito il concorso dell'11 giugno 2024. Non è stata dichiarata riuscita.
+È una copertura osservata, non un contratto stabile del servizio.
 
-Il 4 novembre 2026 sono state consultate direttamente queste pagine ufficiali:
+La finestra iniziale del browser, con la fonte automatica abilitata, è 500;
+il training iniziale del backtest è 350. Si possono scegliere altre finestre:
+se la fonte non le copre, l'operazione fallisce esplicitamente senza analisi
+parziale o dati dimostrativi. Le chiamate API dirette devono specificare
+`limit: 500` (e parametri di training coerenti) per usare la finestra verificata.
 
-- [Archivio estrazioni Lotto](https://www.lotto-italia.it/lotto/estratti-ruote)
-- [Come si gioca](https://www.lotto-italia.it/lotto/come-si-gioca)
-- [Regolamenti](https://www.lotto-italia.it/lotto/regolamenti)
-- [Indicazioni robots](https://www.lotto-italia.it/robots.txt)
+## Attivazione
 
-La pagina dell'archivio offre esplicitamente file ZIP testuali. Il collegamento
-per il periodo dal 2001 a oggi punta a:
+`LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=true` abilita la funzione. Il blueprint
+Render è predisposto con questo valore; le modifiche locali devono ancora
+essere pubblicate e distribuite. L'app locale mantiene la funzione disattivata
+in assenza del valore `true`, così i test e gli avvii locali non scaricano dati
+senza configurazione esplicita.
 
-`https://www.brightstarlottery.it/STORICO_ESTRAZIONI_LOTTO/storico01-oggi.zip`
+Il pulsante iniziale esegue l'analisi Lotto con aggiornamento automatico. Le
+altre analisi, generazioni e prove aggiornano prima la fonte quando selezionata.
+Il primo caricamento richiede diversi minuti; il browser mostra l'avanzamento.
+Le richieste successive riutilizzano la cache persistente e una cache di successo
+di un'ora. Nessun nuovo servizio a pagamento o credenziale è richiesto.
 
-L'URL è stato trovato nella pagina, non ipotizzato. Il dominio dell'archivio è
-diverso dal dominio delle pagine: la policy di rete attuale consente le pagine
-ma rifiuta il download ZIP con HTTP 403 del proxy. L'aggiunta di
-`www.brightstarlottery.it` è salvata nella bozza dell'ambiente e non è stata
-pubblicata. Non sono state aggirate le restrizioni di rete.
+Recupero progressivo, ripresa, conflitti, completezza e limiti sono descritti in
+[official-api-sync.md](official-api-sync.md). Non si possono ancora aggiornare
+automaticamente SuperEnalotto, Win for Life, 10eLotto o MillionDAY.
 
-**Il contenuto reale dello ZIP e il suo formato non sono ancora verificati.**
-Il parser è implementato e testato con fixture artificiali in formato
-`data / sigla ruota / cinque numeri`, ma questo non dimostra che il file
-attualmente pubblicato usi proprio tale struttura. Prima del rilascio bisogna
-scaricare il file consentito, controllarne il formato e confrontare alcuni
-concorsi con la pagina/bollettino ufficiale. Il formato non riconosciuto
-interrompe l'aggiornamento senza inserire dati parzialmente interpretati.
+## Separazione dei dati
 
-## Flusso implementato
+Solo Lotto ordinario reale e tutte le undici ruote. Gli ID ufficiali sono
+`lotto:YYYY-MM-DD`. Gli esperimenti sulla fonte ufficiale usano soltanto gli ID
+della finestra completata: copie manuali dello stesso evento con ID diversi
+non sono mescolate. L'archivio completo resta consultabile separatamente.
+Una risposta incompatibile non sovrascrive estrazioni già presenti.
 
-Per il **Lotto ordinario**, il pulsante **Analizza i dati reali** o l'avvio
-di un esperimento con archivio **Fonte ufficiale (Lotto)** esegue:
+## Date e previsioni
 
-1. Controllo della cache persistente, valida un'ora e per la finestra già caricata.
-2. Se necessario, lettura della pagina ufficiale e scoperta del link ZIP.
-3. Download HTTPS limitato, con verifica TLS e redirect soltanto verso i domini
-   ufficiali esplicitamente ammessi dall'applicazione.
-4. Lettura dello ZIP in memoria, senza estrarre file sul filesystem.
-5. Selezione degli ultimi 1.000 concorsi completi comuni alle undici ruote,
-   o della finestra maggiore richiesta, fino a 10.000. Se la fonte ne offre
-   meno, la disponibilità effettiva è riportata e non vengono inventate righe.
-6. Validazione, confronto con i risultati esistenti e importazione atomica.
-   Un conflitto sospende tutto: nessuna sovrascrittura automatica dei numeri.
-7. Analisi o previsione usando esclusivamente gli ID dei concorsi verificati
-   nell'ultimo aggiornamento, senza contare due volte copie manuali con altri ID.
+La data del concorso è conservata con precisione `date`, a mezzanotte
+Europe/Rome come riferimento. Non è un orario osservato. Le previsioni emesse
+nel giorno del risultato possono essere non valutabili automaticamente;
+la UI distingue questo caso dalle previsioni in attesa. Nessun orario viene
+inventato per far risultare valida una previsione retrospettiva.
 
-**Aggiorna storico ufficiale** forza un nuovo controllo. Il controllo non
-avviene a ogni apertura di pagina e non richiede un cron a pagamento:
-l'aggiornamento è su richiesta prima del calcolo. La cache sopravvive ai
-riavvii di Render grazie al database PostgreSQL.
+## ZIP storico
 
-Il demo sintetico non scarica dati reali. **Archivio completo** e la modalità
-senza aggiornamento mantengono disponibili i dati locali e l'importazione
-manuale. I risultati di un download fallito non vengono sostituiti con demo
-né presentati come aggiornati. Per gli altri giochi il connettore automatico
-non è ancora verificato: l'interfaccia lo indica e non inventa una fonte.
+Lo ZIP collegato dalla pagina ufficiale rimane su
+`https://www.brightstarlottery.it/STORICO_ESTRAZIONI_LOTTO/storico01-oggi.zip`.
+Il dominio è nella bozza di configurazione ma non ancora nella rete attiva:
+il download restituisce 403. Il parser ZIP esistente rimane non verificato
+sul file reale e non viene usato come fallback. Lo storico più ampio richiede
+una fonte accessibile e verificata: la nuova API non promette 1.000 concorsi.
 
-## Date senza orario
-
-Il parser dello storico conserva la precisione `date`: mezzanotte
-`Europe/Rome` serve solo come riferimento tecnico per ordinare il giorno e
-non è presentata come ora osservata dell'estrazione. La UI mostra soltanto
-la data; esportazioni e modelli conservano l'indicazione di precisione.
-
-La valutazione delle previsioni su un risultato senza ora è conservativa:
-devono corrispondere ID e giorno italiano, e la previsione deve essere stata
-emessa prima dell'inizio di quel giorno. Le previsioni dello stesso giorno
-non vengono valutate quando manca un orario che dimostri la precedenza.
-Questo evita confronti retroattivi o orari d'estrazione inventati.
-
-Gli ID costruiti dal connettore sono `lotto:AAAA-MM-GG`, distinti per ruota
-dalla chiave del database. Per una previsione futura collegata a tale fonte
-va usata questa convenzione, non un identificativo arbitrario.
-
-## Persistenza e compatibilità
-
-La migrazione alla versione 3 aggiunge la precisione della data e la tabella
-degli aggiornamenti. Le estrazioni precedenti mantengono precisione `instant`;
-numeri, log, previsioni e risultati non vengono cancellati. Sono stati testati
-sia SQLite sia PostgreSQL, incluso l'aggiornamento da schema versione 2.
-
-Le regole restano marcate preliminari. La presenza di una fonte ufficiale
-e una buona copertura dei test non certificano tutte le regole storiche,
-le varianti o una capacità predittiva superiore al caso.
-
-## Verifiche effettuate
-
-- Lettura reale della pagina ufficiale e individuazione del collegamento ZIP.
-- Parser e sincronizzazione con fixture chiaramente artificiali.
-- Duplicati, conflitti, rollback, cache, riavvio e migrazioni su PostgreSQL.
-- API: aggiornamento prima dei calcoli, esclusione del demo e dei duplicati manuali.
-- Browser: avvio con un clic e successivo uso della cache con una fonte simulata.
-- Download e importazione dello ZIP ufficiale reale: **ancora bloccati dalla rete**.
-
-Il codice del connettore è incluso nella release ma resta disattivato per
-impostazione predefinita. Solo dopo la verifica dello ZIP reale si potrà
-abilitare `LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=true`. Cronologia e confronto
-algoritmi non richiedono questa attivazione e funzionano con gli archivi disponibili.
+La prova tecnica precedente su quattro concorsi è descritta in
+[real-data-validation.md](real-data-validation.md). Nessuno di questi controlli
+dimostra capacità predittiva o vantaggio sul caso.

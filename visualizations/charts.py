@@ -4,7 +4,7 @@ from pathlib import Path
 from config.settings import data_directory
 
 
-def make_figure(result: dict):
+def make_figure(result: dict, view: str = "frequencies", number: int | None = None):
     cache = data_directory() / "matplotlib"
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache))
@@ -34,6 +34,21 @@ def make_figure(result: dict):
         axes.bar(range(start, start + len(result["frequencies"])), result["frequencies"], color="#458df0", label="Frequenza simulata")
         axes.axhline(result["expected_frequency"], color="#f7b955", linestyle="--", label="Attesa teorica")
         axes.set(xlabel="Numero", ylabel="Presenze", title=f"Monte Carlo · {result['samples']:,} estrazioni sintetiche")
+    elif "frequencies" in result and view == "delays":
+        rows = result["delays"]
+        axes.bar([row["number"] for row in rows], [row["current"] for row in rows], color="#458df0", label="Ritardo attuale")
+        axes.set(xlabel="Numero", ylabel="Estrazioni senza uscita", title="Ritardi osservati · non aumentano la probabilità futura")
+    elif "frequencies" in result and view == "sums":
+        values = [row["sum"] for row in result["structures"]]
+        axes.hist(values, bins=min(20, max(values) - min(values) + 1), color="#458df0", label="Distribuzione osservata")
+        axes.set(xlabel="Somma dei numeri principali", ylabel="Estrazioni", title="Somme · finestra analizzata")
+    elif "frequencies" in result and view == "trajectory":
+        row = next((row for row in result["frequencies"] if row["number"] == number), None)
+        if not row or not row.get("trajectory"):
+            raise ValueError("Andamento non disponibile per questo numero")
+        axes.plot([point["draws"] for point in row["trajectory"]], [point["relative"] for point in row["trajectory"]], color="#458df0", label=f"Numero {number}")
+        axes.axhline(row["expected_count"] / result["draws"], color="#f7b955", linestyle="--", label="Riferimento teorico")
+        axes.set(xlabel="Estrazioni dall'inizio della serie", ylabel="Frequenza cumulativa", title="Andamento descrittivo · non previsione")
     elif "frequencies" in result:
         rows = result["frequencies"]
         axes.bar([row["number"] for row in rows], [row["relative"] for row in rows], color="#458df0", label="Frequenza relativa")

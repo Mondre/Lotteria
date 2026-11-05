@@ -54,6 +54,9 @@ def analyze(draws: list[Draw], registry: RuleRegistry) -> dict:
     k, start = rule["count"], rule["minimum"]
     p = k / population
     counts = values.sum(axis=0)
+    # At most 201 chronological checkpoints, including first and last draws.
+    checkpoints = np.unique(np.linspace(1, n, min(n, 201), dtype=int))
+    cumulative = values.cumsum(axis=0)
     raw = [float(binomtest(int(count), n, p).pvalue) for count in counts]
     corrected = holm(raw)
     frequency = []
@@ -69,6 +72,8 @@ def analyze(draws: list[Draw], registry: RuleRegistry) -> dict:
                           "z": (int(count) - n * p) / sqrt(n * p * (1 - p)) if p < 1 else None,
                           "ci95": [max(0.0, center - margin), min(1.0, center + margin)],
                           "p_value": raw[column], "p_holm": corrected[column],
+                          "trajectory": [{"draws": int(step), "relative": float(cumulative[step - 1, column]) / int(step)}
+                                         for step in checkpoints],
                           "windows": {str(window): {"n": min(n, window), "count": int(values[-window:, column].sum())}
                                       for window in WINDOWS}})
         hits = np.flatnonzero(values[:, column])
@@ -95,11 +100,12 @@ def analyze(draws: list[Draw], registry: RuleRegistry) -> dict:
               "wheel": draws[0].wheel, "synthetic": draws[0].synthetic,
               "rules_verified": bool(rule["verified"]), "frequencies": frequency,
               "delays": delays, "structures": structures,
+              "extras_analysis": describe_extras(draws, rule),
               "notes": ["Un ritardo elevato non aumenta la probabilità della prossima uscita.",
                         "Intervalli Wilson marginali al 95%; frequenze con p-value corretti Holm nella famiglia dei numeri.",
                         "Coppie e terzine: test unilaterali corretti su tutte le combinazioni, in famiglie separate.",
                         "Questi test non dimostrano prevedibilità; nessun modello predittivo è qui validato.",
-                        "Analisi dei soli numeri principali; extra e Numerone restano separati."]}
+                        "Test sui soli numeri principali; gli extra configurati hanno conteggi descrittivi separati."]}
     for size, name in ((2, "pairs"), (3, "triples")):
         counter = Counter(combo for draw in draws for combo in combinations(sorted(draw.numbers), size))
         inclusion = comb(k, size) / comb(population, size) if k >= size else 0
@@ -114,6 +120,24 @@ def analyze(draws: list[Draw], registry: RuleRegistry) -> dict:
                              key=lambda row: (-row["count"], row["numbers"]))[:50]
     result["temporal"] = temporal_tests(values)
     return result
+
+
+def describe_extras(draws: list[Draw], rule: dict) -> dict:
+    """Descrizione marginale dei soli extra configurati, senza ipotesi sul caso."""
+    results = {}
+    for name, specification in rule["extras"].items():
+        counts = Counter(draw.extras[name] for draw in draws)
+        results[name] = {
+            "draws": len(draws), "minimum": specification["minimum"],
+            "maximum": specification["maximum"], "rules_verified": bool(rule["verified"]),
+            "frequencies": [{"number": number, "count": counts[number],
+                             "relative": counts[number] / len(draws)}
+                            for number in range(specification["minimum"], specification["maximum"] + 1)],
+            "notes": "Conteggi marginali descrittivi, separati dai numeri principali. "
+                     "Nessuna indipendenza o distribuzione uniforme presupposta; "
+                     "non sono probabilità future. Regole degli extra non verificate."
+        }
+    return results
 
 
 def temporal_tests(values: np.ndarray, permutations: int = 199, seed: int = 42) -> dict:

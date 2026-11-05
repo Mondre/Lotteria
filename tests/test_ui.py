@@ -37,6 +37,44 @@ class GuiSmokeTests(unittest.TestCase):
             window.refresh()
             window.close()
 
+    def test_analysis_worker_and_all_chart_views(self):
+        import time
+        from PySide6.QtWidgets import QApplication
+        from database.store import Store
+        from games.rules import RuleRegistry
+        from data_sources.importer import import_file
+        from ui.analysis_dialog import AnalysisDialog
+        from ui.chart_dialog import ChartDialog
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "charts.sqlite3", RuleRegistry())
+            source = Path(__file__).resolve().parent.parent / "examples" / "synthetic_lotto_roma.json"
+            import_file(store, source, synthetic=True)
+            dialog = AnalysisDialog(store, None)
+            dialog.wheel.setCurrentText("Roma")
+            dialog.synthetic.setChecked(True)
+            dialog.analyze()
+            deadline = time.monotonic() + 30
+            while dialog.worker.isRunning() and time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(.01)
+            self.assertTrue(dialog.worker.wait(30000))
+            app.processEvents()
+            self.assertIsNotNone(dialog.result)
+            self.assertEqual(dialog.table.rowCount(), 90)
+            chart = ChartDialog(dialog.result, dialog)
+            chart.show()
+            for view in ("frequencies", "delays", "sums", "trajectory"):
+                chart.view.setCurrentIndex(chart.view.findData(view))
+                app.processEvents()
+                self.assertTrue(chart.canvas.figure.axes[0].has_data())
+            chart.number.setCurrentIndex(6)
+            app.processEvents()
+            chart.canvas.figure.savefig(Path(folder) / "chart.png")
+            self.assertGreater((Path(folder) / "chart.png").stat().st_size, 1000)
+            chart.close()
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

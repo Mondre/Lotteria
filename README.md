@@ -8,12 +8,15 @@ I punteggi dei modelli **non sono probabilità di vincita**.
 
 ## Versione web
 
-Il connettore automatico del Lotto è incluso ma disattivato per impostazione
-predefinita (`LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=false`): la pagina ufficiale è stata
-verificata, ma il download ZIP su un dominio distinto è tuttora bloccato dalla
-rete di sviluppo. Stato, funzionamento e limiti sono documentati in
-[docs/automatic-data.md](docs/automatic-data.md). I test usano fixture artificiali
-e non equivalgono a una verifica dello storico reale.
+Il connettore automatico del Lotto usa i servizi pubblici del sito ufficiale.
+Verificata una finestra di **500 concorsi per ruota** (5.500 estrazioni reali),
+con ripresa dopo interruzioni e cache persistente. Il browser propone 500;
+richieste maggiori falliscono esplicitamente se la fonte non le copre.
+Il blueprint Render abilita la funzione alla prossima distribuzione; in locale
+serve `LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=true`. Il file ZIP più ampio resta
+bloccato dalla rete e non è usato come fallback.
+Dettagli: [docs/automatic-data.md](docs/automatic-data.md). Le modifiche sono
+ancora locali fino a una richiesta esplicita di pubblicazione.
 
 La nuova interfaccia browser riutilizza database, importazione, statistiche,
 modelli e backtesting del desktop. Non richiede PySide6 e non scarica risorse
@@ -95,11 +98,18 @@ modelli ML, combinazioni, backtesting e registro di previsioni immutabili.
 La GUI comprende le nove sezioni richieste; importazioni e calcoli pesanti
 usano thread di background. I servizi sono utilizzabili anche da terminale.
 
-**La GUI desktop non è stata eseguita:** PySide6 non è installato e il test
-desktop viene esplicitamente saltato in sua assenza. Il precedente problema
-di installazione non riguarda il nuovo workflow web, verificato in Chromium.
-La verifica delle fonti ufficiali e l'acquisizione di dati reali restano da completare.
-Le regole incluse sono preliminari (`verified: false`).
+La GUI desktop è stata verificata su Linux offscreen, inclusi analisi in
+background e grafici. Il pacchetto Windows non è stato ancora eseguito;
+è predisposto un workflow dedicato: [docs/windows-desktop.md](docs/windows-desktop.md).
+L’acquisizione automatica è verificata per una finestra di 500 concorsi Lotto;
+lo storico più ampio e gli altri giochi restano da completare.
+Una prova funzionale su 44 estrazioni reali recenti è riuscita tramite i servizi
+pubblici del sito ufficiale, in un database temporaneo:
+[docs/real-data-validation.md](docs/real-data-validation.md). Non valida
+capacità predittive e non attiva la sincronizzazione automatica.
+Le regole incluse restano preliminari (`verified: false`); il formato base di
+Lotto, 10eLotto e MillionDAY è stato confrontato con fonti ufficiali accessibili.
+Fonti, data e limiti: [docs/rule-verification.md](docs/rule-verification.md).
 XGBoost e il pacchetto Windows non sono stati verificati.
 
 ## Installazione e avvio
@@ -137,11 +147,15 @@ il registro delle operazioni è persistente in SQLite.
 
 `config/games.json` configura Lotto (ruote separate), SuperEnalotto,
 10eLotto (modalità separate), Win for Life Classico con Numerone e MillionDAY.
-Le regole **non sono verificate presso fonti ufficiali** e non modellano tutte
+Le regole hanno una **verifica parziale del formato base**, documentata per gioco,
+e non modellano tutte
 le varianti, i premi, le opzioni o le evoluzioni storiche dei regolamenti.
 Gli extra richiesti dalla variante devono essere presenti nell'archivio.
-Analisi e generazione attualmente riguardano **solo i numeri principali**,
-escludendo extra e Numerone; le combinazioni non sono giocate complete.
+Modelli e generazione riguardano **solo i numeri principali**; le combinazioni
+non sono giocate complete. Le analisi includono anche conteggi marginali separati
+per gli extra già configurati (Jolly, SuperStar e Numerone), senza attribuire
+probabilità future o presumere indipendenza dai numeri principali. Le regole
+degli extra restano preliminari.
 
 L'inserimento manuale rifiuta numeri fuori intervallo, duplicati interni, varianti
 sconosciute, ruote errate, date future e date senza fuso.
@@ -165,7 +179,8 @@ confermare per errore un file diverso da quello esaminato.
 
 Il dialogo offre un modello CSV vuoto: non contiene estrazioni dimostrative
 che possano essere scambiate per dati reali. In **Archivio estrazioni** sono
-disponibili anche **Inserisci estrazione** (con fonte, data e ora ISO con fuso,
+disponibili la navigazione di tutta la finestra selezionata (100 righe per pagina,
+dalla più recente) e **Inserisci estrazione** (con fonte, data e ora ISO con fuso,
 eventuali extra) ed **Esporta selezione JSON** (fino a 10.000 righe della
 serie filtrata). L'export contiene il flag sintetico, così una successiva
 importazione non può scambiare il demo per dati reali. Non è un backup
@@ -208,12 +223,21 @@ Rigenerazione: `python -m data_sources.synthetic nuovo_demo.json --seed 42`.
 
 Il connettore accetta un URL HTTPS autorizzato in uno dei formati normalizzati:
 inserirlo nella GUI oppure usare `--url URL --format json` nell'importatore.
-Non esistono fonti ufficiali preconfigurate, URL inventati o scraping di pagine.
+Questo connettore generico non preconfigura fonti per gli altri giochi.
+Per Lotto web è disponibile il connettore ufficiale descritto sopra.
 Il connettore importa l'archivio disponibile e non garantisce che la fonte
 fornisca 1.000 estrazioni per ogni gioco. Non inserire credenziali negli URL.
 Il dominio deve essere consentito dalla configurazione di rete del cloud.
 
 ## Analisi statistiche
+
+Grafici web e desktop: ritardi, distribuzione delle somme e andamento cumulativo
+per numero. Dettagli e compatibilità con analisi salvate:
+[docs/analysis-charts.md](docs/analysis-charts.md).
+
+Nella pagina web le frequenze si possono ordinare cliccando le intestazioni e
+filtrare per numero. **Esplora** apre intervalli Wilson, ritardi e frequenze
+nelle finestre disponibili, anche nei risultati riaperti dalla cronologia.
 
 - Frequenze assolute e per estrazione, finestre 10/25/50/100/250/500/1000,
   attesa teorica, deviazione standard, Z e IC marginali Wilson al 95%.
@@ -316,7 +340,7 @@ PyInstaller deve essere eseguito e verificato su Windows, non da Linux.
 `config/`. `lotto_statistics` evita di oscurare il modulo standard `statistics`.
 Dominio e servizi non importano Qt e sono riutilizzabili via web.
 
-Prima di considerare completo il prodotto: ripristinare rete e verificare GUI;
+Prima di considerare completo il prodotto: completare l’accesso alle fonti;
 verificare fonti e regole ufficiali, incluse le evoluzioni storiche; aggiungere
 connettori specifici per archivi reali; analizzare extra e varianti aggiuntive;
 arricchire la dashboard analitica, integrare Plotly/Pandas dove utile;

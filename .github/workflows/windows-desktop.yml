@@ -1,0 +1,33 @@
+name: Verifica desktop Windows
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      LOTTOPREDICT_DATA_DIR: ${{ runner.temp }}/lottopredict-desktop-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt -r requirements-web-test.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python main.py --check
+      - run: python main.py --smoke-test
+      - name: Crea pacchetto
+        run: python -m PyInstaller --noconfirm --clean --windowed --name LottoPredictAI --add-data "config/games.json;config" main.py
+      - name: Verifica eseguibile fuori dal checkout
+        run: python scripts/check_windows_package.py dist/LottoPredictAI/LottoPredictAI.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LottoPredictAI-Windows
+          path: dist/LottoPredictAI/
+          retention-days: 7

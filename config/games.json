@@ -1,12 +1,210 @@
 {
   "schema_version": 1,
   "rules": [
-    {"game": "Lotto", "variant": "ordinario", "minimum": 1, "maximum": 90, "count": 5, "wheels": ["Bari", "Cagliari", "Firenze", "Genova", "Milano", "Napoli", "Palermo", "Roma", "Torino", "Venezia", "Nazionale"], "extras": {}, "verified": false},
-    {"game": "SuperEnalotto", "variant": "ordinario", "minimum": 1, "maximum": 90, "count": 6, "wheels": [], "extras": {"jolly": {"minimum": 1, "maximum": 90, "distinct_main": true}, "superstar": {"minimum": 1, "maximum": 90, "distinct_main": false}}, "verified": false},
-    {"game": "10eLotto", "variant": "ogni_5_minuti", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
-    {"game": "10eLotto", "variant": "legata_al_lotto", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
-    {"game": "10eLotto", "variant": "immediata", "minimum": 1, "maximum": 90, "count": 20, "wheels": [], "extras": {}, "verified": false},
-    {"game": "Win for Life", "variant": "classico", "minimum": 1, "maximum": 20, "count": 10, "wheels": [], "extras": {"numerone": {"minimum": 1, "maximum": 20, "distinct_main": false}}, "verified": false},
-    {"game": "MillionDAY", "variant": "ordinario", "minimum": 1, "maximum": 55, "count": 5, "wheels": [], "extras": {}, "verified": false}
+    {
+      "game": "Lotto",
+      "variant": "ordinario",
+      "minimum": 1,
+      "maximum": 90,
+      "count": 5,
+      "wheels": [
+        "Bari",
+        "Cagliari",
+        "Firenze",
+        "Genova",
+        "Milano",
+        "Napoli",
+        "Palermo",
+        "Roma",
+        "Torino",
+        "Venezia",
+        "Nazionale"
+      ],
+      "extras": {},
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "basic_format_checked",
+        "fields": [
+          "minimum",
+          "maximum",
+          "count",
+          "wheels"
+        ],
+        "sources": [
+          "https://www.lotto-italia.it/lotto/come-si-gioca/ruote-del-lotto"
+        ],
+        "limitations": [
+          "Numero Oro, Simbolotto, Ambetto, Lotto Più e premi non modellati.",
+          "Ruota Nazionale introdotta il 4 maggio 2005; nessuna validazione delle regole per epoca."
+        ]
+      }
+    },
+    {
+      "game": "SuperEnalotto",
+      "variant": "ordinario",
+      "minimum": 1,
+      "maximum": 90,
+      "count": 6,
+      "wheels": [],
+      "extras": {
+        "jolly": {
+          "minimum": 1,
+          "maximum": 90,
+          "distinct_main": true
+        },
+        "superstar": {
+          "minimum": 1,
+          "maximum": 90,
+          "distinct_main": false
+        }
+      },
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "not_checked",
+        "fields": [],
+        "sources": [],
+        "limitations": [
+          "Fonte ufficiale non accessibile dalla rete di sviluppo; nessuna conferma del formato o degli extra."
+        ]
+      }
+    },
+    {
+      "game": "10eLotto",
+      "variant": "ogni_5_minuti",
+      "minimum": 1,
+      "maximum": 90,
+      "count": 20,
+      "wheels": [],
+      "extras": {},
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "basic_format_checked",
+        "fields": [
+          "minimum",
+          "maximum",
+          "count"
+        ],
+        "sources": [
+          "https://www.lotto-italia.it/10-e-lotto/come-si-gioca"
+        ],
+        "limitations": [
+          "Numero Oro, Doppio Oro, Extra, Special Time e premi non modellati.",
+          "Le tre modalità restano serie separate. La ventina legata al Lotto non viene ricostruita dalle ruote."
+        ]
+      }
+    },
+    {
+      "game": "10eLotto",
+      "variant": "legata_al_lotto",
+      "minimum": 1,
+      "maximum": 90,
+      "count": 20,
+      "wheels": [],
+      "extras": {},
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "basic_format_checked",
+        "fields": [
+          "minimum",
+          "maximum",
+          "count"
+        ],
+        "sources": [
+          "https://www.lotto-italia.it/10-e-lotto/come-si-gioca"
+        ],
+        "limitations": [
+          "Numero Oro, Doppio Oro, Extra, Special Time e premi non modellati.",
+          "Le tre modalità restano serie separate. La ventina legata al Lotto non viene ricostruita dalle ruote."
+        ]
+      }
+    },
+    {
+      "game": "10eLotto",
+      "variant": "immediata",
+      "minimum": 1,
+      "maximum": 90,
+      "count": 20,
+      "wheels": [],
+      "extras": {},
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "basic_format_checked",
+        "fields": [
+          "minimum",
+          "maximum",
+          "count"
+        ],
+        "sources": [
+          "https://www.lotto-italia.it/10-e-lotto/come-si-gioca"
+        ],
+        "limitations": [
+          "Numero Oro, Doppio Oro, Extra, Special Time e premi non modellati.",
+          "Le tre modalità restano serie separate. La ventina legata al Lotto non viene ricostruita dalle ruote."
+        ]
+      }
+    },
+    {
+      "game": "Win for Life",
+      "variant": "classico",
+      "minimum": 1,
+      "maximum": 20,
+      "count": 10,
+      "wheels": [],
+      "extras": {
+        "numerone": {
+          "minimum": 1,
+          "maximum": 20,
+          "distinct_main": false
+        }
+      },
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "not_checked",
+        "fields": [],
+        "sources": [],
+        "limitations": [
+          "Fonte ufficiale non accessibile dalla rete di sviluppo; nessuna conferma del formato o degli extra."
+        ]
+      }
+    },
+    {
+      "game": "MillionDAY",
+      "variant": "ordinario",
+      "minimum": 1,
+      "maximum": 55,
+      "count": 5,
+      "wheels": [],
+      "extras": {},
+      "verified": false,
+      "review": {
+        "checked_on": "2026-11-04",
+        "scope": "Formato dei numeri principali; non regolamento completo né validità storica.",
+        "status": "basic_format_checked",
+        "fields": [
+          "minimum",
+          "maximum",
+          "count"
+        ],
+        "sources": [
+          "https://www.lotto-italia.it/millionday/come-giocare"
+        ],
+        "limitations": [
+          "Extra MillionDAY e premi non modellati.",
+          "Concorsi distinti richiedono ID e orario distinti; nessun calendario ricostruito."
+        ]
+      }
+    }
   ]
 }

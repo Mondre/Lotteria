@@ -167,18 +167,24 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
 
     @app.get("/api/config")
     def config():
-        return {"storage": store.backend, "official_sync_enabled": synchronizer.enabled,
+        return {"storage": store.backend, "official_sync_enabled": synchronizer.enabled, "official_default_limit": 500,
                 "rules": list(store.rules.rules.values()), "models": ["uniform", "frequency", "temporal", "logistic", "random_forest", "gradient_boosting", "ensemble"]}
 
     @app.get("/api/dashboard")
     def dashboard(game: str = "Lotto", variant: str = "ordinario", wheel: str = "Roma", synthetic: bool = False,
-                  limit: int = 1000, official_only: bool = False):
+                  limit: int = 1000, official_only: bool = False,
+                  archive_offset: int = Query(default=0, ge=0, le=10000)):
         if not 1 <= limit <= 10000:
             raise HTTPException(422, "Limite da 1 a 10.000")
         selection = Selection(game=game, variant=variant, wheel=wheel, synthetic=synthetic, limit=limit)
         validate_selection(selection)
         history = (synchronizer.history(game, variant, wheel, limit) if official_only and not synthetic
                    else store.history(game, variant, wheel, synthetic, limit))
+        page_size = 100
+        # Clamp stale offsets after an archive or filter changes.
+        archive_offset = min(archive_offset // page_size * page_size,
+                             max(0, (len(history) - 1) // page_size * page_size))
+        archive_page = list(reversed(history))[archive_offset:archive_offset + page_size]
         frequency = []
         if history:
             from collections import Counter
@@ -188,7 +194,8 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
         return {"real_count": store.count(), "synthetic_count": store.count(True),
                 "selected_count": len(history), "synthetic": synthetic,
                 "latest": asdict(history[-1]) if history else None,
-                "frequency": frequency, "draws": [asdict(draw) for draw in reversed(history[-100:])],
+                "frequency": frequency, "draws": [asdict(draw) for draw in archive_page],
+                "archive_page": {"offset": archive_offset, "limit": page_size, "total": len(history)},
                 "data_source": {"automatic": synchronizer.enabled and Synchronizer.supported(game, variant),
                                 "scope": "official" if official_only else "archive",
                                 "last_sync": {key: value for key, value in (store.sync_info(LOTTO_SOURCE_KEY) or {}).items()
@@ -284,13 +291,21 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
             return {**result, "data_update": {key: value for key, value in update.items() if key != "covered_days"}}
         return jobs.submit(selection.operation, operation, selection.model_dump(mode="json"))
 
+    @app.get("/api/sources/status")
+    def source_status():
+        from data_sources.lotto_api import PROGRESS_KEY
+        try:
+            return {"enabled": synchronizer.enabled, "progress": store.sync_info(PROGRESS_KEY)}
+        except Exception:
+            raise HTTPException(503, "Stato aggiornamento non disponibile: riprovare.") from None
+
     @app.post("/api/sources/sync", status_code=202)
     def sync_source(selection: Selection):
         validate_selection(selection)
         if selection.synthetic or not Synchronizer.supported(selection.game, selection.variant):
             raise HTTPException(422, "Aggiornamento ufficiale disponibile soltanto per Lotto reale")
         if not synchronizer.enabled:
-            raise HTTPException(409, "Download ufficiale ancora in verifica: aggiornamento automatico non attivato.")
+            raise HTTPException(409, "Aggiornamento ufficiale disattivato nella configurazione.")
         return jobs.submit("sync", lambda: synchronizer.ensure(selection.game, selection.variant, selection.wheel,
                                                                selection.limit, force=True))
 

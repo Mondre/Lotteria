@@ -71,6 +71,59 @@ class WebTests(unittest.TestCase):
         self.assertEqual(real["real_count"], 0)
         self.assertEqual(len(demo["draws"]), 100)
 
+    def test_archive_pages_cover_selection_without_changing_statistics(self):
+        self.demo()
+        url = "/api/dashboard?synthetic=true"
+        first = self.client.get(url).json()
+        seen = []
+        previous_date = None
+        for offset in range(0, 1000, 100):
+            page = self.client.get(url + f"&archive_offset={offset}").json()
+            self.assertEqual(page["archive_page"], {"offset": offset, "limit": 100, "total": 1000})
+            self.assertEqual(page["latest"], first["latest"])
+            self.assertEqual(page["frequency"], first["frequency"])
+            for draw in page["draws"]:
+                date = datetime.fromisoformat(draw["occurred_at"])
+                if previous_date is not None:
+                    self.assertLess(date, previous_date)
+                previous_date = date
+                seen.append(draw["draw_id"])
+        self.assertEqual(len(set(seen)), 1000)
+        # Stale offsets are clamped when the window or dataset changes.
+        short = self.client.get(url + "&limit=125&archive_offset=900").json()
+        self.assertEqual(short["archive_page"], {"offset": 100, "limit": 100, "total": 125})
+        self.assertEqual(len(short["draws"]), 25)
+        real = self.client.get("/api/dashboard?archive_offset=900").json()
+        self.assertEqual(real["archive_page"], {"offset": 0, "limit": 100, "total": 0})
+        self.assertEqual(real["draws"], [])
+        other_wheel = self.client.get(url + "&wheel=Milano&archive_offset=100").json()
+        self.assertEqual(other_wheel["draws"], [])
+        for offset in ("-1", "10001", "oops"):
+            self.assertEqual(self.client.get(url + "&archive_offset=" + offset).status_code, 422)
+
+    def test_import_analyze_and_reopen_extra_results(self):
+        records = [{"game": "Win for Life", "variant": "classico", "draw_id": f"extra-{i}",
+                    "occurred_at": f"2025-01-0{i + 1}T12:00:00+01:00", "numbers": list(range(1, 11)),
+                    "extras": {"numerone": value}, "synthetic": True}
+                   for i, value in enumerate((1, 1, 20))]
+        content = json.dumps(records)
+        preview = self.wait_job(self.post("/api/import/preview?format=json&synthetic=true", content=content))
+        self.assertEqual(self.store.count(True), 0)
+        imported = self.wait_job(self.post("/api/import?format=json&synthetic=true", content=content))
+        self.assertEqual(imported["result"]["inserted"], 3)
+        self.assertEqual(preview["status"], "completed")
+        selection = {"game": "Win for Life", "variant": "classico", "wheel": "", "synthetic": True}
+        job = self.wait_job(self.post("/api/jobs", json={**selection, "operation": "analyze"}))
+        self.assertEqual(job["status"], "completed", job)
+        extra = job["result"]["extras_analysis"]["numerone"]
+        self.assertEqual(extra["frequencies"][0]["count"], 2)
+        self.assertEqual(self.store.experiment(job["id"])["result"]["extras_analysis"]["numerone"], extra)
+        exported = self.client.get("/api/archive/export", params=selection).json()
+        self.assertEqual(sorted(row["extras"]["numerone"] for row in exported), [1, 1, 20])
+        main_only = self.wait_job(self.post("/api/jobs", json={**selection, "operation": "generate", "combinations": 2}))
+        self.assertEqual(main_only["status"], "completed", main_only)
+        self.assertTrue(all("extras" not in ticket for ticket in main_only["result"]["tickets"]))
+
     def test_upload_and_errors(self):
         row = {"game": "Lotto", "variant": "ordinario", "wheel": "Roma", "draw_id": "<script>1</script>",
                "occurred_at": "2025-01-01T20:00:00+01:00", "numbers": [1, 2, 3, 4, 5], "synthetic": True}
@@ -287,7 +340,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed", result)
         self.assertEqual(result["result"]["model_names"], ["uniform", "frequency"])
 
-    def test_unverified_official_source_is_disabled_by_default(self):
+    def test_source_progress_is_read_only_and_exposes_no_raw_receipts(self):
+        from data_sources.lotto_api import PROGRESS_KEY
+        self.assertEqual(self.client.get("/api/sources/status").json(), {"enabled": False, "progress": None})
+        self.store.save_sync_info(PROGRESS_KEY, {"state": "failed", "completed": 500, "requested": 1000})
+        data = self.client.get("/api/sources/status").json()
+        self.assertEqual(data["progress"]["completed"], 500)
+        self.assertEqual(data["progress"]["state"], "failed")
+        self.assertNotIn("payload", data["progress"])
+
+    def test_official_source_requires_explicit_configuration(self):
         from unittest.mock import Mock
         self.sync_patch.stop()
         self.app.state.synchronizer.fetcher = Mock(side_effect=AssertionError("Nessun download atteso"))

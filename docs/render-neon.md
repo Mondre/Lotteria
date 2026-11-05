@@ -125,3 +125,8 @@ Ogni test crea e rimuove uno schema isolato. Sono verificati riapertura del
 database, importazione di 1.000 demo, duplicati concorrenti, rollback, previsioni
 immutabili e valutazione dopo l'arrivo del risultato. I test PostgreSQL sono
 esplicitamente saltati se la variabile non è configurata.
+
+Il blueprint corrente imposta `LOTTOPREDICT_OFFICIAL_SYNC_ENABLED=true` per il
+connettore pubblico Lotto verificato su 500 concorsi. Se l'ambiente Render
+contiene un override manuale `false`, la funzione resta disattivata finché
+quel valore non viene aggiornato. Non servono credenziali per la fonte.

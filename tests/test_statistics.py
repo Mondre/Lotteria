@@ -35,6 +35,36 @@ class StatisticsTests(unittest.TestCase):
         self.assertEqual(result["structures"][2]["repeats_previous"], 1)
         self.assertEqual(result["temporal"]["status"], "not_run")
 
+    def test_trajectory_is_bounded_chronological_and_uses_only_prefix(self):
+        draws = [self.draw(i, (1, 2, 3, 4, 5) if i % 2 == 0 else (6, 7, 8, 9, 10)) for i in range(250)]
+        result = analyze(draws, self.registry)
+        for row in result["frequencies"]:
+            points = row["trajectory"]
+            self.assertEqual(len(points), 201)
+            self.assertEqual((points[0]["draws"], points[-1]["draws"]), (1, 250))
+            self.assertEqual(points[-1]["relative"], row["relative"])
+            self.assertEqual([p["draws"] for p in points], sorted({p["draws"] for p in points}))
+            for point in points:
+                count = sum(row["number"] in draw.numbers for draw in draws[:point["draws"]])
+                self.assertEqual(point["relative"], count / point["draws"])
+
+    def test_extras_are_separate_marginal_counts_without_inferred_probabilities(self):
+        draws = [Draw("Win for Life", "classico", str(i), self.date + timedelta(hours=i),
+                      tuple(range(1, 11)), extras={"numerone": value}, synthetic=True)
+                 for i, value in enumerate((1, 1, 20))]
+        result = analyze(draws, self.registry)
+        extra = result["extras_analysis"]["numerone"]
+        self.assertEqual(extra["draws"], 3)
+        self.assertEqual(sum(row["count"] for row in extra["frequencies"]), 3)
+        self.assertEqual(extra["frequencies"][0]["count"], 2)
+        self.assertEqual(extra["frequencies"][-1]["count"], 1)
+        self.assertAlmostEqual(sum(row["relative"] for row in extra["frequencies"]), 1)
+        self.assertNotIn("p_holm", extra["frequencies"][0])
+        self.assertEqual(result["frequencies"][0]["count"], 3)
+        self.assertEqual(result["frequencies"][-1]["count"], 0)
+        self.assertFalse(extra["rules_verified"])
+        self.assertEqual(analyze([self.draw(0, (1, 2, 3, 4, 5))], self.registry)["extras_analysis"], {})
+
     def test_holm_known_values(self):
         np.testing.assert_allclose(holm([.01, .04, .03]), [.03, .06, .06])
         self.assertEqual(holm([.001], 100), [.1])
