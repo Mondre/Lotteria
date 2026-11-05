@@ -6,6 +6,16 @@ Applicazione Python 3.12+ / PySide6 per analisi sperimentali dei giochi a
 estrazione. Non presuppone schemi prevedibili e non promette vincite.
 I punteggi dei modelli **non sono probabilità di vincita**.
 
+## Calcio · Serie A
+
+Nuova sezione web `/football`: calendario e risultati separati dalle lotterie,
+demo sintetico, importazione CSV/JSON, probabilità sperimentali 1–X–2 con modello
+Poisson, previsioni immutabili e backtest cronologico con baseline del passato.
+Migrazione additiva del database a schema 4. L'adattatore dati sportivi è
+predisposto ma disattivato e non verificato live; servono accesso, token e verifica
+delle condizioni del fornitore.
+Dettagli, formati e limiti: [docs/football.md](docs/football.md).
+
 ## Versione web
 
 Il connettore automatico del Lotto usa i servizi pubblici del sito ufficiale.
@@ -300,6 +310,12 @@ iid descrittivi, test esatto della somma di ipergeometriche sotto il nullo
 uniforme indipendente, correzione Holm tra modelli del run. Dipendenze temporali
 possono invalidare gli IC iid. Non scegliere parametri dopo aver osservato il
 test. Ensemble e riaddestramenti ML frequenti possono essere costosi.
+
+In **Test combinazioni** si possono rigenerare fino a 2.000 combinazioni su
+massimo 200 estrazioni finali, escludendo sempre ogni target dal training.
+Il rapporto mostra soglie per combinazione e per concorso, confronto casuale
+di pari numerosità e dettagli ispezionabili. Persistenza nella cronologia e
+limiti: [docs/ticket-backtest.md](docs/ticket-backtest.md).
 
 Il generatore produce combinazioni distinte dei numeri principali: prima dal
 ranking con ex aequo casuali, poi da campionamento pesato. Il punteggio relativo

@@ -47,9 +47,18 @@ class Experiment(Selection):
     retrain_every: int = Field(default=10, ge=1, le=1000)
     seed: int = Field(default=42, ge=0, le=2147483647)
     auto_update: bool = True
+    evaluation_mode: Literal["single", "tickets"] = "single"
+    test_targets: int = Field(default=100, ge=1, le=200)
 
     @model_validator(mode="after")
     def validate_models(self):
+        if self.evaluation_mode == "tickets":
+            if self.operation != "backtest" or self.models is not None:
+                raise ValueError("La verifica combinazioni richiede backtest e un solo modello")
+            if self.test_targets * self.combinations > 2000:
+                raise ValueError("Massimo 2.000 combinazioni per run: ridurre target o combinazioni")
+            if self.initial + self.test_targets > self.limit:
+                raise ValueError("La finestra deve contenere training iniziale e tutti i target richiesti")
         if self.models is not None:
             if self.operation != "backtest":
                 raise ValueError("Il confronto multimodello è disponibile solo per il backtesting")
@@ -102,6 +111,7 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
     store = store or create_store()
     synchronizer = synchronizer or Synchronizer(store, enabled=os.environ.get("LOTTOPREDICT_OFFICIAL_SYNC_ENABLED") == "true")
     jobs = Jobs(store)
+    from football.routes import register
 
     @asynccontextmanager
     async def lifespan(app):
@@ -114,6 +124,7 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
     app = FastAPI(title="LottoPredict AI", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store, app.state.jobs = store, jobs
     app.state.synchronizer = synchronizer
+    register(app, store, jobs)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.middleware("http")
@@ -283,6 +294,10 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
             elif selection.operation == "generate":
                 from predictions.engine import generate
                 result = generate(history, store.rules, selection.model, selection.combinations, selection.seed)
+            elif selection.evaluation_mode == "tickets":
+                from backtesting.tickets import ticket_walk_forward
+                result = ticket_walk_forward(history, store.rules, selection.model, selection.test_targets,
+                                             selection.combinations, selection.initial, selection.train_window, selection.seed)
             else:
                 from backtesting.engine import walk_forward
                 names = tuple(selection.models) if selection.models is not None else (selection.model,)

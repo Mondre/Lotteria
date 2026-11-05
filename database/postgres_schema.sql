@@ -44,5 +44,30 @@ FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
 DROP TRIGGER IF EXISTS results_immutable ON prediction_results;
 CREATE TRIGGER results_immutable BEFORE UPDATE OR DELETE ON prediction_results
 FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
-DELETE FROM schema_version WHERE version=2;
-INSERT INTO schema_version(version) VALUES(3) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS football_matches (
+    match_id TEXT NOT NULL, synthetic INTEGER NOT NULL CHECK(synthetic IN (0,1)), season INTEGER NOT NULL,
+    kickoff TEXT NOT NULL, home TEXT NOT NULL, away TEXT NOT NULL, status TEXT NOT NULL,
+    home_goals INTEGER, away_goals INTEGER, available_at TEXT, source TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(match_id,synthetic), UNIQUE(synthetic,season,home,away)
+);
+CREATE INDEX IF NOT EXISTS football_chronological ON football_matches(synthetic,kickoff);
+CREATE TABLE IF NOT EXISTS football_predictions (
+    id TEXT PRIMARY KEY, match_id TEXT NOT NULL, synthetic INTEGER NOT NULL,
+    created_at TEXT NOT NULL, payload TEXT NOT NULL,
+    FOREIGN KEY(match_id,synthetic) REFERENCES football_matches(match_id,synthetic)
+);
+CREATE TABLE IF NOT EXISTS football_evaluations (
+    prediction_id TEXT PRIMARY KEY REFERENCES football_predictions(id), evaluated_at TEXT NOT NULL,
+    outcome TEXT NOT NULL, payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS football_reports (
+    id TEXT PRIMARY KEY, created_at TEXT NOT NULL, synthetic INTEGER NOT NULL, payload TEXT NOT NULL
+);
+DROP TRIGGER IF EXISTS football_predictions_immutable ON football_predictions;
+CREATE TRIGGER football_predictions_immutable BEFORE UPDATE OR DELETE ON football_predictions
+FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
+DROP TRIGGER IF EXISTS football_evaluations_immutable ON football_evaluations;
+CREATE TRIGGER football_evaluations_immutable BEFORE UPDATE OR DELETE ON football_evaluations
+FOR EACH ROW EXECUTE FUNCTION reject_prediction_change();
+DELETE FROM schema_version WHERE version IN (2,3);
+INSERT INTO schema_version(version) VALUES(4) ON CONFLICT DO NOTHING;

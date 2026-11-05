@@ -40,6 +40,41 @@ class PostgresTests(unittest.TestCase):
         return Draw("Lotto", "ordinario", identifier, datetime(2025, 1, 1, tzinfo=timezone.utc),
                     (1, 2, 3, 4, 5), "Roma", synthetic=True)
 
+    def test_football_tables_prediction_immutability_and_migration(self):
+        from football.data import demo
+        from football.repository import FootballStore
+        from football.engine import backtest
+        import psycopg
+        from database.postgres import PostgresStore
+        repo = FootballStore(self.store)
+        self.assertEqual(repo.upsert(demo(), True)["inserted"], 172)
+        matches = repo.matches(True)
+        prediction = repo.predict(matches[-1].id, True)
+        self.assertAlmostEqual(sum(prediction["probabilities"].values()), 1)
+        with self.store.connect() as connection:
+            with self.assertRaises(psycopg.errors.RaiseException):
+                connection.execute("DELETE FROM football_predictions WHERE id=?", (prediction["id"],))
+        from dataclasses import replace
+        from football.models import instant
+        target = matches[-1]
+        final = replace(target, status="FINISHED", home_goals=1, away_goals=1,
+                        available_at=(instant(target.kickoff) + timedelta(hours=3)).isoformat())
+        later = instant(final.available_at) + timedelta(hours=1)
+        with patch("football.models.utc_now", return_value=later), patch("football.repository.utc_now", return_value=later):
+            repo.upsert([final.payload()], True)
+        self.assertEqual(repo.predictions(True)[0]["evaluation"]["outcome"], "X")
+        report = repo.save_report(backtest(matches, 5), True)
+        self.assertEqual(repo.reports(True)[0]["id"], report["id"])
+        with self.store.connect() as connection:
+            connection.execute("UPDATE schema_version SET version=3")
+        self.store.close()
+        self.store = PostgresStore(self.dsn, self.rules)
+        self.addCleanup(self.store.close)
+        self.assertEqual(len(FootballStore(self.store).matches(True)), 172)
+        self.assertEqual(len(FootballStore(self.store).predictions(True)), 1)
+        with self.store.connect() as connection:
+            self.assertEqual(connection.execute("SELECT version FROM schema_version").fetchone()["version"], 4)
+
     def test_persistence_duplicates_filters_and_restart(self):
         from database.postgres import PostgresStore
         self.assertTrue(self.store.add_draw(self.draw()))

@@ -55,7 +55,34 @@ CREATE TABLE IF NOT EXISTS experiments (
     result TEXT, error TEXT
 );
 CREATE INDEX IF NOT EXISTS experiments_created ON experiments(created_at,id);
-PRAGMA user_version = 3;
+CREATE TABLE IF NOT EXISTS football_matches (
+    match_id TEXT NOT NULL, synthetic INTEGER NOT NULL CHECK(synthetic IN (0,1)), season INTEGER NOT NULL,
+    kickoff TEXT NOT NULL, home TEXT NOT NULL, away TEXT NOT NULL, status TEXT NOT NULL,
+    home_goals INTEGER, away_goals INTEGER, available_at TEXT, source TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(match_id,synthetic), UNIQUE(synthetic,season,home,away)
+);
+CREATE INDEX IF NOT EXISTS football_chronological ON football_matches(synthetic,kickoff);
+CREATE TABLE IF NOT EXISTS football_predictions (
+    id TEXT PRIMARY KEY, match_id TEXT NOT NULL, synthetic INTEGER NOT NULL,
+    created_at TEXT NOT NULL, payload TEXT NOT NULL,
+    FOREIGN KEY(match_id,synthetic) REFERENCES football_matches(match_id,synthetic)
+);
+CREATE TABLE IF NOT EXISTS football_evaluations (
+    prediction_id TEXT PRIMARY KEY REFERENCES football_predictions(id), evaluated_at TEXT NOT NULL,
+    outcome TEXT NOT NULL, payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS football_reports (
+    id TEXT PRIMARY KEY, created_at TEXT NOT NULL, synthetic INTEGER NOT NULL, payload TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS football_predictions_update BEFORE UPDATE ON football_predictions
+BEGIN SELECT RAISE(ABORT, 'Previsione calcio immutabile'); END;
+CREATE TRIGGER IF NOT EXISTS football_predictions_delete BEFORE DELETE ON football_predictions
+BEGIN SELECT RAISE(ABORT, 'Previsione calcio immutabile'); END;
+CREATE TRIGGER IF NOT EXISTS football_evaluations_update BEFORE UPDATE ON football_evaluations
+BEGIN SELECT RAISE(ABORT, 'Risultato calcio immutabile'); END;
+CREATE TRIGGER IF NOT EXISTS football_evaluations_delete BEFORE DELETE ON football_evaluations
+BEGIN SELECT RAISE(ABORT, 'Risultato calcio immutabile'); END;
+PRAGMA user_version = 4;
 """
 
 
@@ -68,7 +95,7 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3):
+            if version not in (0, 1, 2, 3, 4):
                 raise ValueError("Versione database non supportata")
             columns = connection.execute("PRAGMA table_info(draws)").fetchall()
             if columns and "date_precision" not in {row["name"] for row in columns}:

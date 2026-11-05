@@ -17,7 +17,7 @@ async function loadExperimentHistory(){
    header.append(headrow);t.append(header);const body=node('tbody');
    for(const item of data.items){
     const p=item.request||{}, row=node('tr');
-    row.append(node('td',null,dateLabel(item.created_at,true)),node('td',null,experimentNames[item.operation]||item.operation),node('td',null,[p.game,p.wheel||p.variant].filter(Boolean).join(' · ')),node('td',null,Array.isArray(p.models)?`Confronto (${new Set(['uniform','frequency',...p.models]).size} modelli)`:modelNames[p.model]||'—'),node('td',null,p.synthetic?'Sintetico':p.official_only?'Fonte ufficiale':'Archivio completo'));
+    row.append(node('td',null,dateLabel(item.created_at,true)),node('td',null,item.operation==='backtest'&&p.evaluation_mode==='tickets'?'Test combinazioni':experimentNames[item.operation]||item.operation),node('td',null,[p.game,p.wheel||p.variant].filter(Boolean).join(' · ')),node('td',null,Array.isArray(p.models)?`Confronto (${new Set(['uniform','frequency',...p.models]).size} modelli)`:modelNames[p.model]||'—'),node('td',null,p.synthetic?'Sintetico':p.official_only?'Fonte ufficiale':'Archivio completo'));
     const status=node('td',null,item.status==='completed'?'Completato':'Non riuscito');
     if(item.error){const error=node('div','history-error',item.error);status.append(error);}row.append(status);
     const actions=node('td'), group=node('div','history-actions');
@@ -36,10 +36,10 @@ function restoreExperimentRequest(p){
  if(typeof p.wheel==='string')$('wheel').value=p.wheel;
  $('dataset').value=p.synthetic?'synthetic':p.official_only&&state.officialEnabled?'real':'manual';
  if(Number.isInteger(p.limit)&&p.limit>=1&&p.limit<=10000){if(![...$('limit').options].some(option=>option.value===String(p.limit))){const option=node('option',null,`${nf.format(p.limit)} estrazioni`);option.value=p.limit;$('limit').append(option);}$('limit').value=String(p.limit);}
- for(const [field,id]of [['model','model'],['seed','seed'],['combinations','combinations'],['initial','initial'],['retrain_every','retrain']])if(p[field]!==undefined)$(id).value=p[field];
+ for(const [field,id]of [['model','model'],['seed','seed'],['combinations','combinations'],['initial','initial'],['retrain_every','retrain'],['test_targets','test-targets']])if(p[field]!==undefined)$(id).value=p[field];
  document.querySelectorAll('#comparison-models input').forEach(input=>input.checked=(p.models||['temporal']).includes(input.value));$('train-window').value=p.train_window||0;$('auto-update').checked=state.officialEnabled&&p.auto_update!==false;
 }
-function experimentView(operation,parameters={}){if(operation==='backtest'&&Array.isArray(parameters.models))return 'comparison';return ({generate:'predictions',backtest:'backtest',simulate:'analysis',analyze:'analysis'})[operation]||'analysis';}
+function experimentView(operation,parameters={}){if(parameters.evaluation_mode==='tickets')return 'tickettest';if(operation==='backtest'&&Array.isArray(parameters.models))return 'comparison';return ({generate:'predictions',backtest:'backtest',simulate:'analysis',analyze:'analysis'})[operation]||'analysis';}
 async function openExperiment(id){
  if(state.busy)return;
  try{const job=await api('/api/jobs/'+id);if(job.status!=='completed')throw new Error(job.error||'Esperimento non completato.');
