@@ -15,6 +15,8 @@ with sync_playwright() as p:
     assert page.locator('#wheel-field').is_hidden()
     page.locator('#winforlife-demo').click()
     page.wait_for_function("() => document.getElementById('metric-count').textContent.replaceAll('.','')==='1000'")
+    page.locator('#winforlife-open').click()
+    assert page.locator('#dataset').input_value()=='synthetic'
     page.locator('#run').click();page.locator('#statistics-table').wait_for(state='visible',timeout=30000)
     assert page.locator('#statistics-table tbody tr').count()==20
     assert page.locator('.extra-statistics').count()==1
