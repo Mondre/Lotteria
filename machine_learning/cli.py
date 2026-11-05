@@ -25,6 +25,8 @@ def main() -> int:
     parser.add_argument("--train-window", type=int)
     parser.add_argument("--retrain-every", type=int, default=10)
     parser.add_argument("--combinations", type=int, default=5)
+    parser.add_argument("--ticket-strategy", choices=("weighted", "disjoint"), default="weighted")
+    parser.add_argument("--include-numerone", action="store_true", help="Solo Win for Life Classico: genera anche il Numerone")
     parser.add_argument("--target-id")
     parser.add_argument("--target-date")
     args = parser.parse_args()
@@ -34,12 +36,16 @@ def main() -> int:
         parser.error("Un backtest non può salvare una previsione futura")
     if args.operation != "backtest" and args.models is not None:
         parser.error("--models è disponibile solo per il backtest")
+    if args.operation != "generate" and args.ticket_strategy != "weighted":
+        parser.error("--ticket-strategy è disponibile solo per generate")
+    if args.operation != "generate" and args.include_numerone:
+        parser.error("--include-numerone è disponibile qui solo per generate")
     registry = RuleRegistry()
     store = Store(data_directory() / "lottopredict.sqlite3", registry)
     try:
         draws = store.history(args.game, args.variant, args.wheel, args.synthetic, args.limit)
         if args.operation == "generate":
-            result = generate(draws, registry, args.model, args.combinations, args.seed)
+            result = generate(draws, registry, args.model, args.combinations, args.seed, args.ticket_strategy, args.include_numerone)
             if args.target_id:
                 result["saved_id"] = save_prediction(store, result, args.target_id, datetime.fromisoformat(args.target_date))
         else:

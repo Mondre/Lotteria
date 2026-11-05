@@ -238,6 +238,8 @@ class Store:
                 raise ValueError("Combinazione non valida")
         if (rule["wheels"] and payload["wheel"] not in rule["wheels"]) or (not rule["wheels"] and payload["wheel"]):
             raise ValueError("Ruota non valida")
+        from winforlife.engine import validate_tickets
+        validate_tickets(payload, rule)
         identifier = str(uuid.uuid4())
         with self.connect() as connection:
             self.begin_write(connection)
@@ -268,6 +270,10 @@ class Store:
                     or not matches_date):
                 continue
             matches = [len(set(ticket["numbers"]) & set(draw.numbers)) for ticket in payload["tickets"]]
+            if payload.get("include_numerone"):
+                matches = {"main_matches": matches,
+                           "numerone_matches": [ticket["extras"]["numerone"] == draw.extras["numerone"] for ticket in payload["tickets"]],
+                           "actual_numerone": draw.extras["numerone"]}
             connection.execute("INSERT INTO prediction_results VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
                                (row["id"], draw_row_id, datetime.now(timezone.utc).isoformat(), json.dumps(matches)))
 
@@ -281,6 +287,13 @@ class Store:
         result = []
         for raw in rows:
             row = dict(raw)
+            if row["matches"] is not None:
+                stored_matches = json.loads(row["matches"])
+                if isinstance(stored_matches, dict) and "main_matches" in stored_matches:
+                    row["winforlife_result"] = stored_matches
+                    row["numerone_matches"] = stored_matches["numerone_matches"]
+                    row["actual_numerone"] = stored_matches["actual_numerone"]
+                    row["matches"] = json.dumps(stored_matches["main_matches"])
             if row["matches"] is not None:
                 status = "evaluated"
             elif row["result_date"] is None:

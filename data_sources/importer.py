@@ -111,6 +111,17 @@ def parse_record(record: dict[str, Any], source: str, synthetic: bool) -> Draw:
         extras = json.loads(extras, object_pairs_hook=unique_fields)
     if not isinstance(extras, dict):
         raise ValueError("extras deve essere un oggetto JSON")
+    if "numerone" in record:
+        if (record.get("game"), record.get("variant")) != ("Win for Life", "classico"):
+            raise ValueError("La colonna numerone è riservata a Win for Life Classico")
+        numerone = record["numerone"]
+        if isinstance(numerone, str) and numerone.strip().isascii() and numerone.strip().isdigit():
+            numerone = int(numerone.strip())
+        if type(numerone) is not int:
+            raise ValueError("numerone deve essere un intero")
+        if "numerone" in extras and (type(extras["numerone"]) is not int or extras["numerone"] != numerone):
+            raise ValueError("Numerone in conflitto tra colonna e campo extras")
+        extras = {**extras, "numerone": numerone}
     for key in ("game", "variant", "draw_id", "occurred_at"):
         if not isinstance(record[key], str) or not record[key].strip():
             raise ValueError(f"{key} deve essere testo non vuoto")

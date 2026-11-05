@@ -37,6 +37,8 @@ class RuleRegistry:
             raise ValueError("Estrazione nel futuro")
         if draw.date_precision not in ("instant", "date"):
             raise ValueError("Precisione della data non valida")
+        if rule.get("requires_observed_time") and draw.date_precision != "instant":
+            raise ValueError("Questo gioco richiede data e ora con fuso per distinguere i concorsi")
         if draw.date_precision == "date":
             local = draw.occurred_at.astimezone(ZoneInfo("Europe/Rome"))
             if any((local.hour, local.minute, local.second, local.microsecond)):

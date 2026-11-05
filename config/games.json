@@ -177,7 +177,8 @@
         "limitations": [
           "Fonte ufficiale non accessibile dalla rete di sviluppo; nessuna conferma del formato o degli extra."
         ]
-      }
+      },
+      "requires_observed_time": true
     },
     {
       "game": "MillionDAY",

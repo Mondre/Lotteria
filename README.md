@@ -161,8 +161,10 @@ Le regole hanno una **verifica parziale del formato base**, documentata per gioc
 e non modellano tutte
 le varianti, i premi, le opzioni o le evoluzioni storiche dei regolamenti.
 Gli extra richiesti dalla variante devono essere presenti nell'archivio.
-Modelli e generazione riguardano **solo i numeri principali**; le combinazioni
-non sono giocate complete. Le analisi includono anche conteggi marginali separati
+Di norma modelli e generazione riguardano **solo i numeri principali**.
+Per Win for Life Classico il modulo web e la CLI possono aggiungere un Numerone
+separato: vedere [la guida Win for Life](docs/winforlife.md). Il formato resta
+preliminare e non certifica una giocata o un premio. Le analisi includono anche conteggi marginali separati
 per gli extra già configurati (Jolly, SuperStar e Numerone), senza attribuire
 probabilità future o presumere indipendenza dai numeri principali. Le regole
 degli extra restano preliminari.
@@ -316,6 +318,18 @@ massimo 200 estrazioni finali, escludendo sempre ogni target dal training.
 Il rapporto mostra soglie per combinazione e per concorso, confronto casuale
 di pari numerosità e dettagli ispezionabili. Persistenza nella cronologia e
 limiti: [docs/ticket-backtest.md](docs/ticket-backtest.md).
+
+In **Confronti futuri** si possono registrare prima del concorso coppie
+immutabili modello/casuale, con stessi dati e budget. I risultati vengono
+conteggiati dopo l'acquisizione dell'estrazione, separatamente per protocollo.
+Metodo, limiti e aggiornamento esplicito: [docs/prospective-lotto.md](docs/prospective-lotto.md).
+
+La distribuzione opzionale **Numeri disgiunti** evita ripetizioni fra combinazioni
+(cinque cinquine coprono 25 numeri); la modalità ponderata resta predefinita.
+Il test casuale usa la stessa strategia per separare copertura da capacità
+predittiva. Il confronto locale non ha dimostrato maggiore accuratezza e ha
+peggiorato gli ambi in quel campione. Metodo, numeri e limiti:
+[docs/ticket-coverage.md](docs/ticket-coverage.md).
 
 Il generatore produce combinazioni distinte dei numeri principali: prima dal
 ranking con ex aequo casuali, poi da campionamento pesato. Il punteggio relativo

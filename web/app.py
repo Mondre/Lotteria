@@ -2,7 +2,7 @@ import base64
 import binascii
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 import json
 import hashlib
 import os
@@ -42,6 +42,8 @@ class Experiment(Selection):
     model: ModelName = "frequency"
     models: list[ModelName] | None = Field(default=None, max_length=7)
     combinations: int = Field(default=5, ge=1, le=100)
+    ticket_strategy: Literal["weighted", "disjoint"] = "weighted"
+    include_numerone: bool = False
     initial: int = Field(default=700, ge=2, le=9999)
     train_window: int | None = Field(default=None, ge=2, le=10000)
     retrain_every: int = Field(default=10, ge=1, le=1000)
@@ -52,6 +54,10 @@ class Experiment(Selection):
 
     @model_validator(mode="after")
     def validate_models(self):
+        if self.include_numerone and not ((self.game, self.variant) == ("Win for Life", "classico") and (self.operation == "generate" or self.operation == "backtest" and self.evaluation_mode == "tickets")):
+            raise ValueError("Numerone disponibile solo per generazione e test combinazioni Win for Life Classico")
+        if self.ticket_strategy != "weighted" and not (self.operation == "generate" or self.operation == "backtest" and self.evaluation_mode == "tickets"):
+            raise ValueError("La strategia di copertura è disponibile solo per generazione e test delle combinazioni")
         if self.evaluation_mode == "tickets":
             if self.operation != "backtest" or self.models is not None:
                 raise ValueError("La verifica combinazioni richiede backtest e un solo modello")
@@ -69,6 +75,23 @@ class Experiment(Selection):
             required = minimum_history(self.models if self.models is not None else [self.model])
             if min(self.initial, self.train_window or self.initial) < required:
                 raise ValueError(f"Servono almeno {required} estrazioni per il training dei modelli selezionati")
+        return self
+
+
+class ProspectiveRequest(Selection):
+    official_only: bool = True
+    model: ModelName = "frequency"
+    combinations: int = Field(default=5, ge=1, le=100)
+    seed: int = Field(default=42, ge=0, le=2147483647)
+    ticket_strategy: Literal["weighted", "disjoint"] = "weighted"
+    target_day: date
+
+    @model_validator(mode="after")
+    def valid_future(self):
+        from predictions.prospective import validate_day
+        validate_day(self.target_day)
+        if (self.game, self.variant) != ("Lotto", "ordinario") or not self.synthetic and not self.official_only:
+            raise ValueError("Selezionare Lotto ordinario e fonte ufficiale oppure archivio sintetico")
         return self
 
 
@@ -162,6 +185,8 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
             raise HTTPException(422, "Gioco o variante non supportati")
         if (rule["wheels"] and selection.wheel not in rule["wheels"]) or (not rule["wheels"] and selection.wheel):
             raise HTTPException(422, "Ruota non valida per la selezione")
+        if isinstance(selection, (Experiment, ProspectiveRequest)) and selection.ticket_strategy == "disjoint" and selection.combinations * rule["count"] > rule["maximum"] - rule["minimum"] + 1:
+            raise HTTPException(422, f"Senza sovrapposizioni: massimo {(rule['maximum'] - rule['minimum'] + 1) // rule['count']} combinazioni")
 
     @app.get("/")
     def index():
@@ -218,6 +243,17 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
         from data_sources.importer import import_file
         path = Path(__file__).parent.parent / "examples" / "synthetic_lotto_roma.json"
         return jobs.submit("demo", lambda: asdict(import_file(store, path, synthetic=True)))
+
+    @app.post("/api/winforlife/demo", status_code=202)
+    def winforlife_demo():
+        from winforlife.demo import records
+        from data_sources.importer import import_content
+        return jobs.submit("demo", lambda: asdict(import_content(store, json.dumps(records()).encode(), "json", "SYNTHETIC_DEMO_WINFORLIFE", True)))
+
+    @app.get("/api/winforlife/template")
+    def winforlife_template():
+        return Response("game,variant,draw_id,occurred_at,numbers,numerone,synthetic\r\n", media_type="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="modello-winforlife.csv"'})
 
     async def upload_content(request: Request) -> bytes:
         from data_sources.importer import MAX_BYTES
@@ -293,11 +329,11 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
                 result = analyze(history, store.rules)
             elif selection.operation == "generate":
                 from predictions.engine import generate
-                result = generate(history, store.rules, selection.model, selection.combinations, selection.seed)
+                result = generate(history, store.rules, selection.model, selection.combinations, selection.seed, selection.ticket_strategy, selection.include_numerone)
             elif selection.evaluation_mode == "tickets":
                 from backtesting.tickets import ticket_walk_forward
                 result = ticket_walk_forward(history, store.rules, selection.model, selection.test_targets,
-                                             selection.combinations, selection.initial, selection.train_window, selection.seed)
+                                             selection.combinations, selection.initial, selection.train_window, selection.seed, ticket_strategy=selection.ticket_strategy, include_numerone=selection.include_numerone)
             else:
                 from backtesting.engine import walk_forward
                 names = tuple(selection.models) if selection.models is not None else (selection.model,)
@@ -305,6 +341,28 @@ def create_app(store: Store | None = None, allowed_hosts: list[str] | None = Non
                                       selection.train_window, selection.retrain_every, selection.seed)
             return {**result, "data_update": {key: value for key, value in update.items() if key != "covered_days"}}
         return jobs.submit(selection.operation, operation, selection.model_dump(mode="json"))
+
+    @app.post("/api/prospective-lotto", status_code=202)
+    def prospective(body: ProspectiveRequest):
+        validate_selection(body)
+        if not body.synthetic and not synchronizer.enabled:
+            raise HTTPException(409, "Fonte ufficiale disattivata: configurarla prima di registrare confronti reali")
+        def operation():
+            from predictions.prospective import register_trial
+            if body.synthetic:
+                history = store.history(body.game, body.variant, body.wheel, True, body.limit)
+            else:
+                synchronizer.ensure(body.game, body.variant, body.wheel, body.limit)
+                history = synchronizer.history(body.game, body.variant, body.wheel, body.limit)
+            return register_trial(store, history, body.target_day, body.model, body.combinations,
+                                  body.seed, body.ticket_strategy, body.limit)
+        return jobs.submit("prospective", operation)
+
+    @app.get("/api/prospective-lotto")
+    def prospective_history(wheel: str = "Roma", synthetic: bool = False):
+        validate_selection(Selection(wheel=wheel, synthetic=synthetic))
+        from predictions.prospective import list_trials
+        return list_trials(store, wheel, synthetic)
 
     @app.get("/api/sources/status")
     def source_status():

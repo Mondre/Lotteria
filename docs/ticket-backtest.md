@@ -81,3 +81,18 @@ terno non basta a concluderlo. È una riproduzione retrospettiva con parametri
 espliciti, non una verifica delle combinazioni specifiche dello screenshot,
 non una previsione prospettica e non una stima dei premi. Nessun database o
 sito dell'utente è stato modificato per questa prova; nessun download aggiuntivo.
+
+## Strategie di distribuzione
+
+La nuova opzione `ticket_strategy=disjoint` evita numeri ripetuti fra combinazioni
+dello stesso gruppo. La baseline casuale applica la stessa opzione; le medie di
+copertura sono mostrate per entrambi. Non viene cambiato il default ponderato.
+Il confronto esplorativo non ha mostrato un miglioramento affidabile della
+capacità predittiva: vedere [ticket-coverage.md](ticket-coverage.md).
+
+## Win for Life Classico
+
+Attivando il Numerone, il test valuta separatamente i 10 numeri principali e
+il numero extra, sia per il modello sia per il casuale. Mostra anche i conteggi
+congiunti, senza convertirli in categorie premio. Il target completo è escluso
+dal training. Dettagli e limiti in [winforlife.md](winforlife.md).

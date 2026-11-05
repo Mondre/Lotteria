@@ -75,6 +75,48 @@ class PostgresTests(unittest.TestCase):
         with self.store.connect() as connection:
             self.assertEqual(connection.execute("SELECT version FROM schema_version").fetchone()["version"], 4)
 
+    def test_prospective_pair_and_evaluation_on_postgres(self):
+        from predictions.prospective import register_trial, list_trials
+        from games.models import Draw
+        from zoneinfo import ZoneInfo
+        now = datetime.now(timezone.utc)
+        history = [Draw('Lotto','ordinario',str(i),now-timedelta(days=40-i),(1,2,3,4,5),'Roma',synthetic=True) for i in range(30)]
+        day = now.astimezone(ZoneInfo('Europe/Rome')).date() + timedelta(days=2)
+        first = register_trial(self.store, history, day, ticket_strategy='disjoint')
+        again = register_trial(self.store, history, day, ticket_strategy='disjoint')
+        self.assertEqual(first['id'], again['id'])
+        self.assertEqual(len(self.store.prediction_history()), 2)
+        target = Draw('Lotto','ordinario','lotto:'+day.isoformat(),datetime.combine(day,datetime.min.time(),ZoneInfo('Europe/Rome')),(1,2,3,4,5),'Roma',synthetic=True,date_precision='date')
+        with patch('games.rules.datetime', wraps=datetime) as clock:
+            clock.now.return_value = target.occurred_at + timedelta(days=1)
+            self.store.add_draw(target)
+        result = list_trials(self.store,'Roma',True)
+        self.assertEqual(result['summaries'][0]['evaluated'],1)
+        self.assertEqual(result['trials'][0]['status'],'evaluated')
+        self.assertEqual(result['trials'][0]['model']['payload']['coverage']['distinct_numbers'],25)
+
+    def test_winforlife_full_prediction_keeps_numerone_result(self):
+        from winforlife.demo import records
+        from data_sources.importer import parse_record
+        from predictions.engine import generate, save_prediction
+        from games.models import Draw
+        draws = [parse_record(record,'demo',True) for record in records(80)]
+        payload = generate(draws,self.rules,include_numerone=True)
+        target = datetime.now(timezone.utc)+timedelta(hours=2)
+        identifier = save_prediction(self.store,payload,'wfl-future',target)
+        first = payload['tickets'][0]
+        actual = Draw('Win for Life','classico','wfl-future',target,tuple(first['numbers']),extras=first['extras'],synthetic=True)
+        with patch('games.rules.datetime',wraps=datetime) as clock:
+            clock.now.return_value = target+timedelta(hours=1)
+            self.store.add_draw(actual)
+        saved = self.store.prediction_history()[0]
+        self.assertEqual(json.loads(saved['matches'])[0],10)
+        self.assertTrue(saved['numerone_matches'][0])
+        with self.store.connect() as connection:
+            raw = json.loads(connection.execute('SELECT matches FROM prediction_results WHERE prediction_id=?',(identifier,)).fetchone()['matches'])
+            self.assertTrue(raw['numerone_matches'][0])
+            self.assertEqual(raw['main_matches'][0],10)
+
     def test_persistence_duplicates_filters_and_restart(self):
         from database.postgres import PostgresStore
         self.assertTrue(self.store.add_draw(self.draw()))

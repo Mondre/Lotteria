@@ -34,6 +34,7 @@ function restoreExperimentRequest(p){
  if(p.game&&[...$('game').options].some(option=>option.value===p.game)){$('game').value=p.game;setVariants();}
  if(p.variant&&[...$('variant').options].some(option=>option.value===p.variant)){$('variant').value=p.variant;setWheels();}
  if(typeof p.wheel==='string')$('wheel').value=p.wheel;
+ $('ticket-strategy').value=p.ticket_strategy||'weighted';$('include-numerone').checked=p.include_numerone===true;
  $('dataset').value=p.synthetic?'synthetic':p.official_only&&state.officialEnabled?'real':'manual';
  if(Number.isInteger(p.limit)&&p.limit>=1&&p.limit<=10000){if(![...$('limit').options].some(option=>option.value===String(p.limit))){const option=node('option',null,`${nf.format(p.limit)} estrazioni`);option.value=p.limit;$('limit').append(option);}$('limit').value=String(p.limit);}
  for(const [field,id]of [['model','model'],['seed','seed'],['combinations','combinations'],['initial','initial'],['retrain_every','retrain'],['test_targets','test-targets']])if(p[field]!==undefined)$(id).value=p[field];
